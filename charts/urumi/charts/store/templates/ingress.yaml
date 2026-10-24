@@ -1,0 +1,30 @@
+# The storefront's public URL. This is the ONLY way into the store from outside the cluster.
+# MariaDB has no Ingress, so it can't be reached from outside at all.
+#
+# Locally:  http://store.localtest.me → laptop port 80 → k3d load balancer → Traefik → this rule → urumi-wordpress:80
+# On a VPS: same rule, only "host" (and optionally TLS) change through values-prod.yaml.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}-store
+  labels: {{- include "store.labels" . | nindent 4 }}
+spec:
+  {{- with .Values.ingressClassName }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- if .Values.tls.enabled }}
+  tls:
+    - hosts: [{{ .Values.host | quote }}]
+      secretName: {{ .Values.tls.secretName }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Release.Name }}-wordpress
+                port:
+                  name: http

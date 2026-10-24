@@ -1,0 +1,5 @@
+apiVersion: v2
+name: store
+description: WordPress + WooCommerce with MariaDB, and a setup Job
+type: application
+version: 0.1.0

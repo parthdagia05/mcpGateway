@@ -1,0 +1,6 @@
+# Local k3d overrides. Install with:
+#   helm upgrade --install urumi charts/urumi -n urumi --create-namespace -f charts/urumi/values-local.yaml
+
+store:
+  host: store.localtest.me
+  storageClass: local-path   # k3d/k3s built-in provisioner: a folder on the node

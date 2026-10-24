@@ -1,0 +1,11 @@
+apiVersion: v2
+name: urumi
+description: WooCommerce store + WooCommerce MCP server + MCP gateway and dashboard
+type: application
+version: 0.1.0
+
+# Subcharts live unpacked in charts/<name>/. No "repository:" means "already here, don't download".
+# Each one is configured under its own key in values.yaml (store: ..., later woo-mcp: ..., gateway: ...).
+dependencies:
+  - name: store
+    version: 0.1.0

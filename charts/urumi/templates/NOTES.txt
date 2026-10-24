@@ -1,0 +1,3 @@
+Urumi installed in namespace {{ .Release.Namespace }}.
+
+Storefront: http://{{ .Values.store.host }}

@@ -1,0 +1,18 @@
+# Dependencies and build output
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Local secrets and overrides: never commit these
+.env
+.env.*
+*.secret.yaml
+values-*.secret.yaml
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+
+# Logs
+*.log

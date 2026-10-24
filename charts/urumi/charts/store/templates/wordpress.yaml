@@ -1,0 +1,103 @@
+# WordPress: the storefront (PHP + Apache). WooCommerce runs inside it as a plugin.
+#
+# Flow:  browser → Ingress (store.localtest.me) → this Service → WordPress Pod → MariaDB Service → MariaDB Pod
+#
+# Files (core, plugins like WooCommerce, uploaded images) live on a PVC mounted at /var/www/html.
+# Orders/products/settings live in MariaDB. Both survive Pod restarts.
+
+# 1) Disk for WordPress files. ReadWriteOnce = only one node can mount it at a time.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Release.Name }}-wordpress
+  labels: {{- include "store.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep   # don't lose the store's files on "helm uninstall"
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- with .Values.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.wordpress.storage }}
+---
+# 2) Stable in-cluster name "urumi-wordpress:80". Ingress points here; later woo-mcp calls the REST API here.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-wordpress
+  labels: {{- include "store.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app: wordpress
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+# 3) The WordPress Pod itself.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-wordpress
+  labels: {{- include "store.labels" . | nindent 4 }}
+spec:
+  # Only 1 replica: the files disk is ReadWriteOnce, so a second Pod on another node couldn't mount it.
+  replicas: 1
+  # Recreate = stop the old Pod before starting the new one on upgrades. A rolling update would briefly
+  # need two Pods holding the same ReadWriteOnce disk, which can hang on a multi-node cluster.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: wordpress
+  template:
+    metadata:
+      labels:
+        app: wordpress
+        {{- include "store.labels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: wordpress
+          image: {{ .Values.wordpress.image }}
+          ports:
+            - name: http
+              containerPort: 80
+          # The official image writes wp-config.php from these on start. Password comes from the Secret.
+          env:
+            - name: WORDPRESS_DB_HOST
+              value: {{ .Release.Name }}-mariadb:3306   # the Service name, never a Pod IP
+            - name: WORDPRESS_DB_NAME
+              value: wordpress
+            - name: WORDPRESS_DB_USER
+              value: wordpress
+            - name: WORDPRESS_DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ include "store.secretName" . }}, key: mariadb-password }
+          # Startup: first boot copies WordPress files onto the empty disk, which can be slow.
+          # Gives it up to 5 minutes before liveness is allowed to restart it.
+          startupProbe:
+            tcpSocket: { port: http }
+            periodSeconds: 10
+            failureThreshold: 30
+          # Readiness: "can it serve a page?" wp-login.php touches the database, so if MariaDB is down
+          # this fails and the Pod just stops getting traffic (no restart).
+          readinessProbe:
+            httpGet: { path: /wp-login.php, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 5
+          # Liveness: "is Apache alive?" only. Never check the DB here, or a DB outage would restart-loop WordPress.
+          livenessProbe:
+            tcpSocket: { port: http }
+            periodSeconds: 20
+            failureThreshold: 3
+          resources: {{- toYaml .Values.wordpress.resources | nindent 12 }}
+          volumeMounts:
+            - name: files
+              mountPath: /var/www/html
+      volumes:
+        - name: files
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-wordpress

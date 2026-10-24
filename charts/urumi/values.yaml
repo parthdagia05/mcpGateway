@@ -1,0 +1,5 @@
+# Defaults shared by every environment. values-local.yaml / values-prod.yaml override only what differs.
+
+# Settings under "store:" are handed to the store subchart as its .Values
+store:
+  host: store.example.com

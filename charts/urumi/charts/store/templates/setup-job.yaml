@@ -1,0 +1,91 @@
+# First-time setup: turns an empty WordPress into a ready WooCommerce store, with no clicking.
+#
+# Why a Helm hook Job (not an initContainer or a custom image)?
+#  - It runs once per "helm install"/"helm upgrade", not on every Pod restart.
+#  - "kubectl get jobs" + "kubectl logs job/urumi-store-setup" show exactly what happened if it fails.
+#  - The official WordPress image stays untouched.
+# The script itself (files/setup.sh) is idempotent: safe to run again and again.
+
+# The script, stored as a ConfigMap so it's a readable file instead of YAML-escaped shell.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-store-setup
+  labels: {{- include "store.labels" . | nindent 4 }}
+data:
+  setup.sh: |
+{{ .Files.Get "files/setup.sh" | indent 4 }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-store-setup
+  labels: {{- include "store.labels" . | nindent 4 }}
+  annotations:
+    # Run after the store's resources exist, on install AND upgrade.
+    "helm.sh/hook": post-install,post-upgrade
+    # Delete the previous run's Job right before starting a new one, so the last run's logs stay inspectable.
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: 3               # retry a few times (e.g. plugin download hiccup); the script is safe to rerun
+  activeDeadlineSeconds: 900    # give up after 15 minutes instead of hanging forever
+  template:
+    metadata:
+      labels:
+        app: store-setup
+        {{- include "store.labels" . | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      securityContext:
+        # Same user as Apache in the WordPress image (www-data = 33), so files we create
+        # (like the WooCommerce plugin) are owned by the user WordPress runs as.
+        runAsUser: 33
+        runAsGroup: 33
+        runAsNonRoot: true
+      containers:
+        - name: setup
+          image: {{ .Values.setup.image }}
+          command: ["sh", "/scripts/setup.sh"]
+          env:
+            # wp-config.php reads the DB settings from env vars, so wp-cli needs the same ones as WordPress.
+            - name: WORDPRESS_DB_HOST
+              value: {{ .Release.Name }}-mariadb:3306
+            - name: WORDPRESS_DB_NAME
+              value: wordpress
+            - name: WORDPRESS_DB_USER
+              value: wordpress
+            - name: WORDPRESS_DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ include "store.secretName" . }}, key: mariadb-password }
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ include "store.secretName" . }}, key: wp-admin-password }
+            - name: SITE_URL
+              value: "{{ .Values.scheme }}://{{ .Values.host }}"
+            - name: SITE_TITLE
+              value: {{ .Values.setup.siteTitle | quote }}
+            - name: ADMIN_USER
+              value: {{ .Values.setup.adminUser | quote }}
+            - name: ADMIN_EMAIL
+              value: {{ .Values.setup.adminEmail | quote }}
+            - name: WOO_VERSION
+              value: {{ .Values.setup.wooVersion | quote }}
+            - name: CURRENCY
+              value: {{ .Values.setup.currency | quote }}
+            - name: HOME
+              value: /tmp   # wp-cli keeps its download cache under $HOME
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: "1", memory: 512Mi }
+          volumeMounts:
+            - name: files
+              mountPath: /var/www/html
+            - name: scripts
+              mountPath: /scripts
+      volumes:
+        - name: files
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-wordpress
+        - name: scripts
+          configMap:
+            name: {{ .Release.Name }}-store-setup

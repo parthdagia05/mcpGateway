@@ -1,0 +1,41 @@
+# Store subchart defaults. The umbrella's "store:" section overrides these.
+
+# Public hostname of the storefront (Ingress rule + WordPress site URL).
+host: store.example.com
+# http locally, https on a VPS with TLS. Used to build the site URL WordPress links to.
+scheme: http
+# Which ingress controller handles our Ingress. k3s/k3d ship Traefik.
+ingressClassName: traefik
+tls:
+  enabled: false
+  secretName: store-tls
+
+# Name of a Secret you created yourself (keys: mariadb-root-password, mariadb-password, wp-admin-password).
+# Empty = the chart generates one on first install and keeps it.
+existingSecret: ""
+
+# "" = the cluster's default StorageClass.
+storageClass: ""
+
+mariadb:
+  image: mariadb:11.4   # LTS
+  storage: 2Gi
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "1", memory: 768Mi }   # headroom: going over the memory limit = OOMKilled mid-query
+
+wordpress:
+  image: wordpress:7.1.3-php8.3-apache
+  storage: 2Gi
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "1", memory: 512Mi }
+
+# First-time setup Job (WordPress install, WooCommerce, cash on delivery).
+setup:
+  image: wordpress:cli-2.12.0-php8.3
+  wooVersion: "11.2.1"   # pin WooCommerce so every install gets the same plugin
+  adminUser: admin
+  adminEmail: admin@example.com
+  siteTitle: Urumi Store
+  currency: INR
