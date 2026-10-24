@@ -19,7 +19,7 @@ export type Server = {
   error: string | null;
   checkedAt: string | null;
   skippedTools: string[];
-  tools: { name: string; description: string }[];
+  tools: { name: string; tool: string; description: string; minRole: Role; overridden: boolean }[];
 };
 
 export type ServerInput = {
@@ -70,6 +70,8 @@ export const api = {
   updateServer: (id: number, input: ServerInput) => request<Server>("PATCH", `/servers/${id}`, input),
   deleteServer: (id: number) => request<{ ok: true }>("DELETE", `/servers/${id}`),
   refreshServer: (id: number) => request<Server>("POST", `/servers/${id}/refresh`),
+  setToolPolicy: (id: number, tool: string, minRole: Role | "default") =>
+    request<Server>("POST", `/servers/${id}/tools/${encodeURIComponent(tool)}/policy`, { minRole }),
 
   members: () => request<Member[]>("GET", "/users"),
   invite: (email: string, role: Role) => request<{ inviteUrl: string }>("POST", "/users/invite", { email, role }),

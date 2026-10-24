@@ -65,10 +65,10 @@ gateway:
   replicas: 2
   image:
     repository: ghcr.io/parthdagia05/urumi-gateway
-    tag: "0.4.2"
+    tag: "0.5.0"
   dashboard:
     image:
       repository: ghcr.io/parthdagia05/urumi-dashboard
-      tag: "0.1.1"
+      tag: "0.2.0"
   postgres:
     storage: 5Gi

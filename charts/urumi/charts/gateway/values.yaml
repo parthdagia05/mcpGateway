@@ -2,7 +2,7 @@
 
 image:
   repository: urumi/gateway
-  tag: "0.4.2"
+  tag: "0.5.0"
   pullPolicy: IfNotPresent
 
 # Stateless MCP endpoint + Postgres LISTEN/NOTIFY → safe to run more than one.
@@ -42,6 +42,10 @@ seedServers:
 # Chat agent. The API key is NOT a value here: create the Secret yourself (see README), e.g.
 #   kubectl -n urumi create secret generic urumi-llm --from-literal=api-key=...
 # provider "openai" = any OpenAI-compatible API (Groq, OpenRouter, OpenAI, Ollama); "gemini" = Google Gemini.
+# Above this many tools (for one user), the chat agent gets 2 search tools instead of all of them.
+chat:
+  toolSearchThreshold: 20
+
 llm:
   provider: openai
   baseUrl: https://api.groq.com/openai/v1
@@ -56,7 +60,7 @@ resources:
 dashboard:
   image:
     repository: urumi/dashboard
-    tag: "0.1.1"
+    tag: "0.2.0"
     pullPolicy: IfNotPresent
   resources:
     requests: { cpu: 10m, memory: 32Mi }

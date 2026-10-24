@@ -27,7 +27,7 @@ How I limit that:
 - **Every use is audited under the member's name.** The credential is shared; accountability isn't.
 - **Admins can cut access instantly:** revoke the member's key, or disable the server. Both take effect on the next request.
 - **No way around the gateway:** NetworkPolicies mean only the gateway can reach woo-mcp, and only woo-mcp and Traefik can reach WordPress. So even with the token in hand, nothing outside the gateway Pods could use it.
-- **What's missing:** per-role tool permissions, for example "members can read orders but not change them". Today a member can use every tool of every enabled server. That's the next thing I'd add.
+- **Tool permissions:** by default, tools that write or delete (by their MCP annotations) are admin-only. So with the shared WooCommerce credential, a member can read products and orders but can't create products or change order status. Those tools are hidden from their tool list and rejected if called directly. Admins can tighten or loosen any single tool.
 
 ## Why client tokens are not passed through to upstream servers
 
@@ -53,7 +53,7 @@ What I do:
 - **Network limits apply even after compromise.** A compromised in-cluster upstream is boxed in by NetworkPolicy: `everything-mcp` has no egress at all, and `woo-mcp` can only reach WordPress.
 - **SSRF guard on what admins register.** An admin can't point the gateway at internal addresses (`169.254.169.254`, `urumi-postgres`, cluster IPs, `localhost`). URLs must resolve to public addresses, unless the host is on the allow-list of our own in-cluster MCP servers. The check runs again before every connect, which catches DNS rebinding, and the gateway's egress NetworkPolicy blocks private ranges as a second layer.
 
-What I can't fully prevent: a model *can* still be fooled by well-crafted text. The real mitigations are to register only servers you trust, to keep destructive tools behind per-role permissions (not built yet), and to read the audit log.
+What I can't fully prevent: a model *can* still be fooled by well-crafted text. The real mitigations are to register only servers you trust, to keep destructive tools admin-only (the default for tools annotated as writing or destructive), and to read the audit log. A malicious server could also lie in its annotations, marking a destructive tool read-only; admins can override any tool's role.
 
 **If an admin adds a malicious server:**
 - It can see the requests the gateway sends it: tool names and arguments, but never member keys or other servers' credentials.
@@ -71,7 +71,7 @@ What I can't fully prevent: a model *can* still be fooled by well-crafted text. 
 - **act as another member.** Sessions are random tokens in HttpOnly, SameSite=Strict cookies, and the database stores only their hashes.
 
 **A member can:**
-- **use the same tools as everyone,** so in the store they can change an order another member created, or create products. Those changes are shared state, and the audit log shows who did what. Per-role permissions would narrow this.
+- **use the read tools everyone uses,** and any tool an admin has opened to members. By default they can't create products or change orders, so they can't alter another member's work in the store; anything they do is in the audit log.
 - **use up the shared LLM rate limit,** which is shared for the whole team. There are no per-user rate limits yet.
 
 **An admin can** invite and remove users, change roles, revoke anyone's keys, and manage servers. An admin can't read anyone's key or any upstream credential either. Admins can't change their own role or remove themselves, so the last admin can't lock everyone out by accident.

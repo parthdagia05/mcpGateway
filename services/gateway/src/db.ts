@@ -6,6 +6,7 @@
 //   api_keys    - per-user gateway keys. Only a hash is stored; the full key is shown once at creation.
 //   servers     - registered upstream MCP servers. Credentials are stored ENCRYPTED (auth_secret_enc).
 //   audit_logs  - one row per tool call: who, which server/tool, when, how long, outcome.
+//   tool_policies - admin overrides of who may use a tool (members or admins only).
 //   meta        - small key/value flags (e.g. "servers were seeded once").
 
 import pg from "pg";
@@ -69,6 +70,14 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   error        TEXT
 );
 CREATE INDEX IF NOT EXISTS audit_logs_ts_idx ON audit_logs (ts DESC);
+
+-- Per-tool permission overrides. No row = the default from the tool's own annotations (see permissions.ts).
+CREATE TABLE IF NOT EXISTS tool_policies (
+  server_id  INT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+  tool       TEXT NOT NULL,
+  min_role   TEXT NOT NULL CHECK (min_role IN ('member', 'admin')),
+  PRIMARY KEY (server_id, tool)
+);
 
 CREATE TABLE IF NOT EXISTS meta (
   key    TEXT PRIMARY KEY,

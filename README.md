@@ -68,6 +68,10 @@ claude mcp add --transport http urumi http://gateway.localtest.me/mcp --header "
 
 Tools are named `<server>__<tool>`, for example `woocommerce__list_orders`. Try *"What orders came in today?"*
 
+**Tool permissions:** members only see read tools by default. Tools that write or delete, such as `create_product` and `update_order_status`, are admin-only: hidden from a member's tool list and rejected if called anyway. Admins can switch any tool between "members" and "admins only" on the **servers** page.
+
+**Many tools?** Use `http://gateway.localtest.me/mcp?tools=search`. Instead of every tool, your client gets two: `gateway__search_tools` to find a tool by keywords, and `gateway__call_tool` to call it.
+
 ### Chat agent
 Open **chat** in the dashboard and ask, for example: *"Create a product called Masala Chai Tin priced at 249"* or *"What orders came in today?"* Every tool the agent calls is shown above its answer and logged in the audit log under your name.
 
@@ -120,11 +124,13 @@ helm -n urumi rollback urumi <n>  # go back to exactly what ran before
 
 - **How woo-mcp talks to the store:** through the WooCommerce REST API, with OAuth 1.0a request signing. This goes through WooCommerce's own logic, stays stable across versions, and uses a limited, revocable key instead of the database password. [More in the design note](docs/design.md#architecture-choices).
 - **Stand-out items attempted:**
+  - **Tool permissions:** per-tool roles, defaulting to each tool's MCP annotations, with admin overrides; restricted tools are hidden and rejected.
+  - **Handling many tools:** a search mode with `gateway__search_tools` and `gateway__call_tool`, used automatically by the chat agent above 20 tools.
   - **Security hardening:** SSRF guard, default-deny NetworkPolicies, non-root containers, encrypted upstream credentials.
   - **Scaling:** 2 stateless gateway replicas.
   - **Upgrades and rollback:** as above.
   - **VPS values with cert-manager TLS:** prepared, not yet tested on a live server.
 - **Known limitations:**
   - WordPress runs as root (the official Apache image).
-  - No per-role tool permissions or per-user rate limits yet.
+  - No per-user rate limits yet.
   - The free LLM tier is rate-limited, so the chat can be slow when used back to back.

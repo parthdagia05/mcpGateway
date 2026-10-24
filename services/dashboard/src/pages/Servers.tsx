@@ -116,6 +116,7 @@ function ServerCard({ server: s, open, onToggle, isAdmin, onEdit }: { server: Se
               <div className="tool" key={t.name}>
                 <code>{t.name}</code>
                 <span title={t.description}>{t.description || "—"}</span>
+                <ToolAccess serverId={s.id} tool={t} isAdmin={isAdmin} />
               </div>
             ))
           )}
@@ -127,6 +128,39 @@ function ServerCard({ server: s, open, onToggle, isAdmin, onEdit }: { server: Se
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Who may use one tool. Members see a lock on admin-only tools (they're hidden from their MCP tool list).
+ * Admins click to switch between "members" and "admins only"; "default" means it follows the tool's own
+ * MCP annotations (write/destructive tools → admins only), shown with no "*".
+ */
+function ToolAccess({ serverId, tool, isAdmin }: { serverId: number; tool: Server["tools"][number]; isAdmin: boolean }) {
+  const queryClient = useQueryClient();
+  const set = useMutation({
+    mutationFn: (minRole: "member" | "admin" | "default") => api.setToolPolicy(serverId, tool.tool, minRole),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["servers"] }),
+  });
+  const adminOnly = tool.minRole === "admin";
+  const label = adminOnly ? "admins only" : "members";
+  if (!isAdmin) return adminOnly ? <span className="tag amber access">admins only</span> : <span className="access" />;
+  return (
+    <span className="access">
+      <button
+        className={`tag ${adminOnly ? "amber" : "green"} access-toggle`}
+        disabled={set.isPending}
+        title={`Click to make it ${adminOnly ? "available to members" : "admins only"}`}
+        onClick={() => set.mutate(adminOnly ? "member" : "admin")}
+      >
+        {label}{tool.overridden && " *"}
+      </button>
+      {tool.overridden && (
+        <button className="btn ghost sm" title="Back to the default from the tool's annotations" disabled={set.isPending} onClick={() => set.mutate("default")}>
+          reset
+        </button>
+      )}
+    </span>
   );
 }
 

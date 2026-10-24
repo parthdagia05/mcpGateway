@@ -54,6 +54,9 @@ export const config = {
   // (comma-separated host names, e.g. "urumi-woo-mcp,urumi-everything-mcp"). See ssrf.ts.
   allowedInternalHosts: (process.env.ALLOWED_INTERNAL_HOSTS ?? "").split(",").map((h) => h.trim().toLowerCase()).filter(Boolean),
 
+  // The chat agent switches to search mode (2 meta-tools instead of every tool) above this many tools.
+  chatToolSearchThreshold: Number(process.env.CHAT_TOOL_SEARCH_THRESHOLD ?? 20),
+
   // Shown to the chat model as "the current time", so "today" means the same day as in the store.
   timezone: process.env.TIMEZONE ?? "UTC",
 };

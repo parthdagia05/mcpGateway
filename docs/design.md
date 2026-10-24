@@ -47,6 +47,21 @@ The NetworkPolicies allow exactly these hops: Traefik → gateway → woo-mcp �
 - **Descriptions get a `[server]` prefix** and are cut to 1024 characters. The chat agent cuts them further, to 300.
 - **`tools/list` merges** the cached tool lists of every enabled, connected server. The cache is refreshed every 15s, and immediately when a server is added, edited, enabled or disabled.
 
+## Tool permissions
+
+- **Every tool needs a role:** `member` (everyone) or `admin`. The default comes from the tool's own MCP annotations: a tool marked `readOnlyHint: false` or `destructiveHint: true` is admin-only, and everything else is open to members. With woo-mcp that gives exactly "members can read orders, only admins can create products or change order status", with no configuration.
+- **Admins can override any single tool** from the dashboard. Overrides are stored in `tool_policies`, and deleting a server removes its overrides.
+- **Enforced in the gateway on every path.** `tools/list` leaves out tools the caller can't use, and `tools/call` rejects them anyway with an `admin`-only message, audited as `denied`. The chat agent and search mode use the same filtered list, so neither can reveal or run a restricted tool.
+
+## Handling many tools
+
+Ten servers can mean hundreds of tools. Sending all of them to a model on every request wastes tokens and makes it worse at picking one. So the gateway has a **search mode** (`/mcp?tools=search`) that exposes only two tools:
+
+- `gateway__search_tools {query, limit}`: ranks the caller's allowed tools by keyword overlap and returns the best ones with their full input schemas. A word in the tool name counts 3, in the server name 2, in the description 1, with simple plural stemming. For example, "orders today" puts `woocommerce__list_orders` first.
+- `gateway__call_tool {name, arguments}`: calls the chosen tool through the normal path, with the same permissions, timeout and audit. The audit log shows the real tool, not the wrapper.
+
+The chat agent switches to this mode by itself when a user can see more than `chat.toolSearchThreshold` tools (20 by default). Today the admin sees 24 tools, so admin chats use search; a member sees 19, so theirs don't. I chose keyword ranking over embeddings because it needs no extra service, it's predictable, and it's easy to explain why a tool came first. With a few hundred tools, embeddings would be the next step. The name `gateway` is reserved, so no upstream can collide with these two tools.
+
 ## Failure handling
 
 - **Every network step has a timeout:** connect, `tools/list` and `tools/call`, 15s by default and configurable per server. When a call times out, the SDK sends a cancel notification upstream, and the caller gets *"… did not answer within 15s, so the call was cancelled."*
@@ -124,4 +139,4 @@ The chart is the same. `values-prod.yaml` overrides only:
 - **Upstream calls aren't retried automatically**, because a retried `create_product` could create two products. Only connection setup and listing are retried.
 - **One MariaDB and one Postgres replica, with no backups.** That's fine for the assignment; production would add backups or a managed database.
 - **API keys are hashed with SHA-256, not a slow hash.** The keys are 32 random bytes, so they can't be guessed, and a fast lookup by hash keeps per-request auth cheap. Passwords use scrypt.
-- **Members can see every enabled server's tools.** Per-role tool permissions (stand-out item 2) aren't implemented.
+- **Permission defaults trust the upstream's own annotations.** A malicious server could mark a destructive tool as read-only. Admins can override any tool, and only admins can add servers, but I don't verify the annotations.

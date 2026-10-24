@@ -3,6 +3,7 @@
 //   /api/auth/*     login, logout, who am I, accept an invite          (public / any logged-in user)
 //   /api/servers    list servers + status + tools                      (any logged-in user)
 //                   add / edit / disable / remove / re-check           (admin only)
+//                   set who may use a tool (tool permissions)          (admin only)
 //   /api/users      invite, change role, remove                        (admin only)
 //   /api/keys       create / list / revoke YOUR keys                   (any logged-in user)
 //                   list / revoke ANYONE's keys                        (admin only)
@@ -87,7 +88,8 @@ api.use(requireSession);
 const SERVER_NAME = z
   .string()
   .regex(/^[a-z][a-z0-9-]{1,29}$/, "2-30 characters: lowercase letters, digits and '-', starting with a letter")
-  .refine((n) => !n.includes("__"), "can't contain '__' (it separates server and tool names)");
+  .refine((n) => !n.includes("__"), "can't contain '__' (it separates server and tool names)")
+  .refine((n) => n !== "gateway", "'gateway' is reserved for the gateway's own tools (gateway__search_tools)");
 
 // The fields of a server, WITHOUT defaults. Edits (PATCH) must use this as-is: with defaults, a request that
 // only says {"enabled": true} would silently reset authType to "none" and the timeout to 15s.
@@ -174,6 +176,31 @@ api.delete("/servers/:id", requireAdmin, async (req, res) => {
   if (!rowCount) return res.status(404).json({ error: "No such server" });
   await serversChanged();
   res.json({ ok: true });
+});
+
+/**
+ * Tool permissions: who may use one tool. "member" = everyone, "admin" = admins only,
+ * "default" = remove the override and go back to the default from the tool's annotations (permissions.ts).
+ */
+api.post("/servers/:id/tools/:tool/policy", requireAdmin, async (req, res) => {
+  const body = parse(z.object({ minRole: z.enum(["member", "admin", "default"]) }), req, res);
+  if (!body) return;
+  const tool = String(req.params.tool);
+  if (body.minRole === "default") {
+    await pool.query("DELETE FROM tool_policies WHERE server_id = $1 AND tool = $2", [idParam(req), tool]);
+  } else {
+    await pool.query(
+      `INSERT INTO tool_policies (server_id, tool, min_role) VALUES ($1, $2, $3)
+       ON CONFLICT (server_id, tool) DO UPDATE SET min_role = EXCLUDED.min_role`,
+      [idParam(req), tool, body.minRole],
+    ).catch((err) => {
+      if ((err as { code?: string }).code === "23503") return null; // no such server
+      throw err;
+    });
+  }
+  await serversChanged();
+  const server = upstreams.statusList().find((s) => s.id === idParam(req));
+  res.status(server ? 200 : 404).json(server ?? { error: "No such server" });
 });
 
 /** "Check now" button: re-test one server immediately instead of waiting for the background check. */

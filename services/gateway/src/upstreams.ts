@@ -24,6 +24,7 @@ import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import { writeAudit } from "./audit.js";
 import { config } from "./config.js";
 import { pool } from "./db.js";
+import { defaultRole, roleAllows, type Role } from "./permissions.js";
 import { decrypt } from "./security.js";
 import { checkUpstreamUrl } from "./ssrf.js";
 
@@ -83,6 +84,8 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 
 class UpstreamManager {
   private upstreams = new Map<number, Upstream>();
+  /** Admin overrides of tool permissions: server id → (tool name → role required). */
+  private policies = new Map<number, Map<string, Role>>();
 
   /** Load servers from the database, connect to all of them, then keep re-checking in the background. */
   async start() {
@@ -95,6 +98,14 @@ class UpstreamManager {
    * and edited ones (updated_at changed) get a fresh connection with their new URL/credential.
    */
   async reload() {
+    // Permission overrides are small: reload them every time anything changes.
+    const { rows: policyRows } = await pool.query<{ server_id: number; tool: string; min_role: Role }>("SELECT * FROM tool_policies");
+    this.policies = new Map();
+    for (const p of policyRows) {
+      if (!this.policies.has(p.server_id)) this.policies.set(p.server_id, new Map());
+      this.policies.get(p.server_id)!.set(p.tool, p.min_role);
+    }
+
     const { rows } = await pool.query<ServerRow>("SELECT * FROM servers ORDER BY name");
     const ids = new Set(rows.map((r) => r.id));
 
@@ -211,12 +222,21 @@ class UpstreamManager {
 
   // ---------- What MCP clients and the chat agent see ----------
 
-  /** The merged tool list: every tool of every enabled + connected server, under its prefixed name. */
-  listTools(): Tool[] {
+  /** The role a tool needs: the admin's override if there is one, otherwise the default from its annotations. */
+  private requiredRole(up: Upstream, tool: Tool): Role {
+    return this.policies.get(up.row.id)?.get(tool.name) ?? defaultRole(tool);
+  }
+
+  /**
+   * The merged tool list for one caller: every tool of every enabled + connected server, under its prefixed
+   * name, MINUS the tools the caller's role may not use (they are hidden, not just refused).
+   */
+  listTools(caller: Caller): Tool[] {
     const all: Tool[] = [];
     for (const up of this.upstreams.values()) {
       if (up.status !== "connected") continue;
       for (const tool of up.tools) {
+        if (!roleAllows(caller.role, this.requiredRole(up, tool))) continue;
         const description = (tool.description ?? "").slice(0, MAX_DESCRIPTION);
         all.push({ ...tool, name: `${up.row.name}${SEPARATOR}${tool.name}`, description: `[${up.row.name}] ${description}` });
       }
@@ -235,7 +255,7 @@ class UpstreamManager {
     const toolName = split > 0 ? exposedName.slice(split + SEPARATOR.length) : exposedName;
     const up = [...this.upstreams.values()].find((u) => u.row.name === serverName);
 
-    const audit = (outcome: "success" | "tool_error" | "error", error?: string) =>
+    const audit = (outcome: "success" | "tool_error" | "error" | "denied", error?: string) =>
       writeAudit({
         userId: caller.id, userEmail: caller.email, source,
         serverName: up?.row.name ?? serverName, tool: toolName,
@@ -249,7 +269,14 @@ class UpstreamManager {
     if (!up) return fail(`Unknown tool "${exposedName}". Tools are named <server>${SEPARATOR}<tool>; list tools to see what is available.`);
     if (!up.row.enabled) return fail(`The "${up.row.name}" server is disabled by an admin, so its tools can't be used.`);
     if (up.status !== "connected" || !up.client) return fail(`The "${up.row.name}" server is unreachable right now (${up.error ?? "unknown error"}).`);
-    if (!up.tools.some((t) => t.name === toolName)) return fail(`The "${up.row.name}" server has no tool called "${toolName}".`);
+    const tool = up.tools.find((t) => t.name === toolName);
+    if (!tool) return fail(`The "${up.row.name}" server has no tool called "${toolName}".`);
+    if (!roleAllows(caller.role, this.requiredRole(up, tool))) {
+      // Hidden from this user's tool list, and refused here even if they know the name.
+      const message = `"${exposedName}" is restricted to admins. Your role (${caller.role}) can't use it.`;
+      await audit("denied", message);
+      return { isError: true, content: [{ type: "text", text: message }] };
+    }
 
     try {
       // The SDK sends a cancel notification upstream if the timeout fires, then raises an error here.
@@ -295,7 +322,13 @@ class UpstreamManager {
         error: up.error,
         checkedAt: up.checkedAt,
         skippedTools: up.skippedTools,
-        tools: up.tools.map((t) => ({ name: `${up.row.name}${SEPARATOR}${t.name}`, description: t.description ?? "" })),
+        tools: up.tools.map((t) => ({
+          name: `${up.row.name}${SEPARATOR}${t.name}`,
+          tool: t.name,
+          description: t.description ?? "",
+          minRole: this.requiredRole(up, t),
+          overridden: this.policies.get(up.row.id)?.has(t.name) ?? false,
+        })),
       }));
   }
 }
