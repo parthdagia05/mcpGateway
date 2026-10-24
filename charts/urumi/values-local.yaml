@@ -4,3 +4,8 @@
 store:
   host: store.localtest.me
   storageClass: local-path   # k3d/k3s built-in provisioner: a folder on the node
+
+gateway:
+  host: gateway.localtest.me
+  dashboardHost: dashboard.localtest.me
+  storageClass: local-path

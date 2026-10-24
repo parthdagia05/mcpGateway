@@ -8,16 +8,20 @@ VALUES  := $(CHART)/values-local.yaml
 KUBECTL := kubectl --context $(CONTEXT) -n $(NS)
 HELM    := helm --kube-context $(CONTEXT) -n $(NS)
 
-WOO_MCP_IMAGE := urumi/woo-mcp:0.1.0
+WOO_MCP_IMAGE    := urumi/woo-mcp:0.2.0
+EVERYTHING_IMAGE := urumi/everything-mcp:2.0.0
+GATEWAY_IMAGE    := urumi/gateway:0.1.2
 
-.PHONY: cluster images deploy status admin-password setup-logs woo-mcp-forward uninstall
+.PHONY: cluster images deploy status admin-password gateway-admin-password setup-logs woo-mcp-forward uninstall
 
 cluster:          ## create the local k3d cluster (safe to rerun)
 	./scripts/cluster-up.sh
 
 images:           ## build our images and load them into k3d (no registry needed locally)
 	docker build -t $(WOO_MCP_IMAGE) services/woo-mcp
-	k3d image import $(WOO_MCP_IMAGE) -c urumi
+	docker build -t $(EVERYTHING_IMAGE) services/everything
+	docker build -t $(GATEWAY_IMAGE) services/gateway
+	k3d image import $(WOO_MCP_IMAGE) $(EVERYTHING_IMAGE) $(GATEWAY_IMAGE) -c urumi
 
 woo-mcp-forward:  ## debug only: expose woo-mcp on localhost:3300 for MCP Inspector (needs cluster admin access)
 	$(KUBECTL) port-forward svc/urumi-woo-mcp 3300:3000
@@ -30,6 +34,9 @@ status:           ## what's running
 
 admin-password:   ## WordPress admin password (user: admin) for http://store.localtest.me/wp-admin
 	@$(KUBECTL) get secret urumi-store -o jsonpath='{.data.wp-admin-password}' | base64 -d; echo
+
+gateway-admin-password:  ## dashboard login for admin@urumi.local at http://dashboard.localtest.me
+	@$(KUBECTL) get secret urumi-gateway -o jsonpath='{.data.bootstrap-admin-password}' | base64 -d; echo
 
 setup-logs:       ## what the last store setup run did
 	$(KUBECTL) logs job/urumi-store-setup

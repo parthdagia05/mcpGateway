@@ -1,0 +1,85 @@
+# Third-party upstream #2: the MCP reference server. Internal only (ClusterIP, no Ingress).
+#
+# Treated as UNTRUSTED code, so it gets the tightest box of all:
+#  - no Secrets mounted, no service account token (it has nothing worth stealing)
+#  - non-root, read-only filesystem, no Linux capabilities
+#  - NetworkPolicy: only the gateway may call it, and it may call NOTHING (no outbound traffic at all)
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-everything-mcp
+  labels:
+    app.kubernetes.io/part-of: urumi
+spec:
+  type: ClusterIP
+  selector:
+    app: everything-mcp
+  ports:
+    - name: http
+      port: 3001
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-everything-mcp
+  labels:
+    app.kubernetes.io/part-of: urumi
+spec:
+  # 1 replica on purpose: this server keeps MCP sessions in memory, so a second replica
+  # would receive requests for sessions it has never seen.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: everything-mcp
+  template:
+    metadata:
+      labels:
+        app: everything-mcp
+        app.kubernetes.io/part-of: urumi
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+      containers:
+        - name: everything-mcp
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          ports:
+            - name: http
+              containerPort: 3001
+          # It has no health endpoint, so "is the port accepting connections" is the check for both probes.
+          readinessProbe:
+            tcpSocket: { port: http }
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: { port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 20
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-everything-mcp
+  labels:
+    app.kubernetes.io/part-of: urumi
+spec:
+  podSelector:
+    matchLabels:
+      app: everything-mcp
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: gateway
+      ports:
+        - port: 3001
+  egress: []   # no outbound traffic at all

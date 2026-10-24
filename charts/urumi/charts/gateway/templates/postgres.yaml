@@ -1,0 +1,81 @@
+# Postgres: the gateway's database (users, API key hashes, servers, encrypted credentials, audit log).
+# Internal only (ClusterIP, no Ingress) and a NetworkPolicy lets only the gateway Pods connect.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-postgres
+  labels:
+    app.kubernetes.io/part-of: urumi
+spec:
+  type: ClusterIP
+  selector:
+    app: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .Release.Name }}-postgres
+  labels:
+    app.kubernetes.io/part-of: urumi
+spec:
+  serviceName: {{ .Release.Name }}-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+        app.kubernetes.io/part-of: urumi
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 70     # the "postgres" user in the alpine image
+        runAsGroup: 70
+        fsGroup: 70
+      containers:
+        - name: postgres
+          image: {{ .Values.postgres.image }}
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: gateway
+            - name: POSTGRES_USER
+              value: gateway
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ .Release.Name }}-gateway, key: postgres-password }
+            # Data in a subfolder: the volume's root may contain "lost+found", which initdb refuses.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          readinessProbe:   # accepting connections for our database?
+            exec: { command: ["pg_isready", "-U", "gateway", "-d", "gateway"] }
+            periodSeconds: 10
+          livenessProbe:    # process alive? (same cheap check, but lenient)
+            exec: { command: ["pg_isready", "-U", "gateway", "-d", "gateway"] }
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            failureThreshold: 3
+          resources: {{- toYaml .Values.postgres.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- with .Values.storageClass }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.postgres.storage }}

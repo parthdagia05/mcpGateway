@@ -2,7 +2,7 @@
 
 image:
   repository: urumi/woo-mcp   # locally: built and loaded with "k3d image import"; on a VPS: a registry path
-  tag: "0.1.0"
+  tag: "0.2.0"
   pullPolicy: IfNotPresent
 
 replicas: 1   # stateless, so this can safely go higher

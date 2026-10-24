@@ -1,0 +1,134 @@
+# The gateway: MCP endpoint (/mcp), dashboard API (/api), chat agent.
+#
+# Public through Ingress:
+#   http://<host>/mcp              → MCP clients (Claude Code, Cursor, Inspector) with a personal API key
+#   http://<dashboardHost>/api/*   → the dashboard's API (same origin as the dashboard, so no CORS needed)
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-gateway
+  labels:
+    app.kubernetes.io/part-of: urumi
+spec:
+  type: ClusterIP
+  selector:
+    app: gateway
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-gateway
+  labels:
+    app.kubernetes.io/part-of: urumi
+spec:
+  replicas: {{ .Values.replicas }}
+  selector:
+    matchLabels:
+      app: gateway
+  template:
+    metadata:
+      labels:
+        app: gateway
+        app.kubernetes.io/part-of: urumi
+    spec:
+      # The gateway never talks to the Kubernetes API, so it gets no API token at all.
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+      containers:
+        - name: gateway
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            - name: PORT
+              value: "3000"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ .Release.Name }}-gateway, key: postgres-password }
+            # $(POSTGRES_PASSWORD) is filled in by Kubernetes from the variable above.
+            - name: DATABASE_URL
+              value: postgres://gateway:$(POSTGRES_PASSWORD)@{{ .Release.Name }}-postgres:5432/gateway
+            - name: ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef: { name: {{ .Release.Name }}-gateway, key: encryption-key }
+            - name: BOOTSTRAP_ADMIN_EMAIL
+              value: {{ .Values.bootstrapAdminEmail | quote }}
+            - name: BOOTSTRAP_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ .Release.Name }}-gateway, key: bootstrap-admin-password }
+            - name: SEED_SERVERS
+              value: {{ .Values.seedServers | toJson | quote }}
+            # Credential for the seeded WooCommerce upstream (stored encrypted in Postgres on first start).
+            - name: WOO_MCP_TOKEN
+              valueFrom:
+                secretKeyRef: { name: {{ .Release.Name }}-woo-mcp-token, key: token }
+            - name: MCP_PUBLIC_URL
+              value: "{{ .Values.scheme }}://{{ .Values.host }}/mcp"
+            - name: DASHBOARD_URL
+              value: "{{ .Values.scheme }}://{{ .Values.dashboardHost }}"
+            - name: SECURE_COOKIES
+              value: {{ eq .Values.scheme "https" | quote }}
+            - name: UPSTREAM_TIMEOUT_MS
+              value: "{{ mul .Values.upstreamTimeoutSeconds 1000 }}"
+            - name: REFRESH_INTERVAL_MS
+              value: "{{ mul .Values.refreshIntervalSeconds 1000 }}"
+            # Chat agent. optional: true = the gateway still starts if you haven't created this Secret yet.
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef: { name: {{ .Values.llm.secretName }}, key: gemini-api-key, optional: true }
+            - name: GEMINI_MODEL
+              value: {{ .Values.llm.model | quote }}
+          readinessProbe:   # process up AND Postgres reachable (can't check API keys without it)
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 10
+          livenessProbe:    # process up only, so a database blip doesn't restart-loop the gateway
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}-gateway
+  labels:
+    app.kubernetes.io/part-of: urumi
+spec:
+  {{- with .Values.ingressClassName }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- if .Values.tls.enabled }}
+  tls:
+    - hosts: [{{ .Values.host | quote }}, {{ .Values.dashboardHost | quote }}]
+      secretName: {{ .Values.tls.secretName }}
+  {{- end }}
+  rules:
+    # MCP clients
+    - host: {{ .Values.host | quote }}
+      http:
+        paths:
+          - path: /mcp
+            pathType: Prefix
+            backend:
+              service: { name: {{ .Release.Name }}-gateway, port: { name: http } }
+    # The dashboard's API, on the dashboard's own hostname (the dashboard Ingress serves "/")
+    - host: {{ .Values.dashboardHost | quote }}
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service: { name: {{ .Release.Name }}-gateway, port: { name: http } }

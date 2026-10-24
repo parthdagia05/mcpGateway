@@ -1,0 +1,55 @@
+# Gateway subchart defaults. The umbrella's "gateway:" section overrides these.
+
+image:
+  repository: urumi/gateway
+  tag: "0.1.2"
+  pullPolicy: IfNotPresent
+
+# Stateless MCP endpoint + Postgres LISTEN/NOTIFY → safe to run more than one.
+replicas: 2
+
+# Public hostnames. MCP clients use http://<host>/mcp; the dashboard is served on dashboardHost.
+host: gateway.example.com
+dashboardHost: dashboard.example.com
+scheme: http
+ingressClassName: traefik
+tls:
+  enabled: false
+  secretName: gateway-tls
+
+bootstrapAdminEmail: admin@urumi.local
+
+# Per-upstream timeout and how often upstreams are re-checked.
+upstreamTimeoutSeconds: 15
+refreshIntervalSeconds: 15
+
+# Upstreams registered automatically on the FIRST start only. "secretEnv" names an env var below
+# whose value (from a Secret) becomes the stored credential.
+seedServers:
+  - name: woocommerce
+    url: http://urumi-woo-mcp:3000/mcp
+    authType: bearer
+    secretEnv: WOO_MCP_TOKEN
+  - name: everything
+    url: http://urumi-everything-mcp:3001/mcp
+  - name: deepwiki
+    url: https://mcp.deepwiki.com/mcp
+
+# Chat agent. The API key is NOT a value here: create the Secret yourself (see README):
+#   kubectl -n urumi create secret generic urumi-llm --from-literal=gemini-api-key=...
+llm:
+  secretName: urumi-llm
+  model: gemini-2.5-flash
+
+resources:
+  requests: { cpu: 50m, memory: 128Mi }
+  limits: { cpu: 500m, memory: 384Mi }
+
+postgres:
+  image: postgres:17-alpine
+  storage: 1Gi
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 512Mi }
+
+storageClass: ""

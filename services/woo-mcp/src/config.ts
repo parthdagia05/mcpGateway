@@ -26,4 +26,8 @@ export const config = {
 
   // Used to work out what "today" means for list_orders (e.g. Asia/Kolkata).
   timezone: process.env.STORE_TIMEZONE ?? "UTC",
+
+  // Optional bearer token callers must send. The gateway holds it as this server's "upstream credential",
+  // so team members use the tools without ever seeing it. Empty = no token required.
+  authToken: process.env.MCP_AUTH_TOKEN ?? "",
 };

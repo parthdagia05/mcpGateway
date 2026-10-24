@@ -14,4 +14,4 @@ store:
 woo-mcp:
   image:
     repository: urumi/woo-mcp
-    tag: "0.1.0"
+    tag: "0.2.0"

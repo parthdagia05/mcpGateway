@@ -69,6 +69,10 @@ spec:
             - name: WOO_CONSUMER_SECRET
               valueFrom:
                 secretKeyRef: { name: {{ .Release.Name }}-woo-api, key: consumer-secret }
+            # Bearer token callers must present. Only the gateway gets a copy (it's this server's upstream credential).
+            - name: MCP_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef: { name: {{ .Release.Name }}-woo-mcp-token, key: token }
           # /healthz only says "the Node process is up". It does NOT check the store on purpose:
           # if the store is down we still want to answer tool calls with a clear "store unreachable" error.
           readinessProbe:

@@ -1,0 +1,8 @@
+image:
+  repository: urumi/everything-mcp
+  tag: "2.0.0"
+  pullPolicy: IfNotPresent
+
+resources:
+  requests: { cpu: 25m, memory: 64Mi }
+  limits: { cpu: 250m, memory: 192Mi }

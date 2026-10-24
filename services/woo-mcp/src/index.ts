@@ -12,6 +12,7 @@
 // Also serves GET /healthz for the Kubernetes liveness/readiness probes.
 
 import http from "node:http";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { config } from "./config.js";
@@ -35,7 +36,23 @@ function sendJson(res: http.ServerResponse, status: number, body: unknown) {
   res.writeHead(status, { "Content-Type": "application/json" }).end(JSON.stringify(body));
 }
 
+/**
+ * True if the request carries the right bearer token (or no token is configured).
+ * Both sides are hashed first so timingSafeEqual gets equal-length inputs, and the comparison takes
+ * the same time whether the guess is close or not (no timing hints for an attacker).
+ */
+function isAuthorized(req: http.IncomingMessage): boolean {
+  if (!config.authToken) return true;
+  const sent = (req.headers.authorization ?? "").replace(/^Bearer\s+/i, "");
+  const hash = (s: string) => createHash("sha256").update(s).digest();
+  return timingSafeEqual(hash(sent), hash(config.authToken));
+}
+
 async function handleMcp(req: http.IncomingMessage, res: http.ServerResponse) {
+  if (!isAuthorized(req)) {
+    return sendJson(res, 401, { jsonrpc: "2.0", id: null, error: { code: -32001, message: "Unauthorized: missing or wrong bearer token" } });
+  }
+
   let body: unknown;
   if (req.method === "POST") {
     try {

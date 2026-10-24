@@ -60,6 +60,22 @@ Re-planned on Sat Oct 24 (behind schedule). Faster mode from now on: one questio
 - **Container:** two-stage Docker build (no compiler or source in the final image), runs as non-root `node` (uid 1000), read-only filesystem, no Linux capabilities. Locally it's loaded with `k3d image import`; on a VPS it would come from a registry.
 - **Probes:** `/healthz` only checks that the Node process is up, not the store, so when the store is down tool calls still return a clear "store unreachable" error instead of the server vanishing.
 
+**Phase C: Gateway** (`services/gateway`, chart `charts/urumi/charts/gateway`)
+- **One process, two faces:** an MCP *server* at `/mcp` (for Claude Code, Cursor, the chat agent) and an MCP *client* to every upstream (`upstreams.ts`). The dashboard's REST API lives in the same process under `/api`.
+- **Upstreams:** `woocommerce` (ours, needs a bearer token), `everything` (MCP's official reference server, in-cluster) and `deepwiki` (public remote server at `mcp.deepwiki.com`). The first start registers all three automatically, WooCommerce first; this seeding happens only once, so a server an admin deletes doesn't come back.
+- **Collision scheme:** every tool is exposed as `<server>__<tool>` (e.g. `woocommerce__list_orders`). Server names are unique, lowercase, and can't contain `__`, so the first `__` always splits a name correctly. Exposed names must match `[A-Za-z0-9_-]{1,64}`, which is what LLM APIs accept; tools that don't fit are skipped and listed on the server's card instead of being silently renamed.
+- **Routing:** `tools/call` splits the name, finds the server, checks it is enabled + connected + really has that tool, then forwards the call with the server's own timeout.
+- **Failure handling:** every connect/list/call has a timeout (15s by default, per server). Servers are checked in parallel with `Promise.allSettled`, so one dead server never delays the others. A call that hits a connection error marks that server unreachable immediately, and a background check every 15s reconnects it. A slow tool is cancelled at the timeout (the SDK sends a cancel notification upstream) and the caller gets "did not answer within 15s". Every failure is a tool error with a readable message, never a hang or a crash. Tested: a 20s tool was cancelled at 15s; with woo-mcp scaled to 0, the other servers kept working and woocommerce showed "connection refused (is the server running?)".
+- **Upstream credentials:** stored in Postgres **encrypted with AES-256-GCM** (key in the `urumi-gateway` Secret), decrypted only in memory right before an outbound request. API responses only ever say `hasCredential: true`.
+- **Client keys are never forwarded upstream:** the gateway authenticates the user with their key, then calls the upstream with the *server's* credential. Forwarding user keys would hand every upstream a working key to our gateway (the "confused deputy" / token passthrough problem the MCP spec forbids).
+- **API keys:** `mgw_` + 32 random bytes, shown once, stored only as a SHA-256 hash (a fast hash is fine because the key is random, unlike a password). A 12-character prefix is kept for display. Checked on every request with no caching, so **revocation applies to the very next call**, and a call with a revoked key is still audited as `denied` under its owner.
+- **Dashboard login:** email + password (hashed with scrypt). The session token sits in an **HttpOnly, SameSite=Strict** cookie, and the database stores only its hash. Admins invite members with a one-time link (7 days); the member sets their own password.
+- **Roles:** `admin` manages servers, members and anyone's keys; `member` uses tools and manages their own keys. The check is server-side middleware (`requireAdmin`), not just hidden buttons. Members see only their own audit rows.
+- **Audit log:** written in exactly one place, `upstreams.callTool`, which both MCP clients and the chat agent go through. So every call is logged with user, source (mcp/chat), server, tool, time, duration and outcome (`success`, `tool_error`, `error`, `denied`).
+- **Stateless MCP endpoint + 2 replicas:** no `Mcp-Session-Id`, so any replica can answer any request. When an admin changes a server on one replica, Postgres `LISTEN/NOTIFY` tells every replica to reload.
+- **Startup:** the gateway waits for Postgres (retry every 2s) instead of crash-looping. Readiness = Postgres reachable; liveness = process up.
+- **NetworkPolicy:** the gateway accepts traffic only from Traefik. Outbound it may reach DNS, its Postgres, the two in-cluster MCP servers, and the internet on 443 **except** private ranges and `169.254.0.0/16` (cloud metadata). Postgres accepts only the gateway.
+
 ## Suggested order across areas
 
 1. MCP protocol: the heart of everything
@@ -184,6 +200,7 @@ Why this order: MCP and Kubernetes are the two things that can block you. React 
 
 - [x] A. Store on k3d (COD order #12 placed and visible in WooCommerce, 2026-10-24)
 - [x] B. WooCommerce MCP server (5 tools, OAuth-signed REST, NetworkPolicy tested, 2026-10-24)
+- [x] C. Gateway (aggregation, routing, timeouts, keys, roles, invites, audit, 2 replicas; e2e tested 2026-10-24)
 - [ ] 1. MCP protocol
 - [ ] 2. WooCommerce REST API
 - [ ] 3. Kubernetes core + Helm
