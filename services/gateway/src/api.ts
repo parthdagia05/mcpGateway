@@ -7,6 +7,7 @@
 //   /api/keys       create / list / revoke YOUR keys                   (any logged-in user)
 //                   list / revoke ANYONE's keys                        (admin only)
 //   /api/audit      the audit log: admins see everyone, members see their own calls
+//   /api/chat       ask the chat agent; it calls tools as YOU (audited under your name)
 //
 // Upstream credentials are WRITE-ONLY here: you can set or replace one, but no response ever contains it
 // (the most you get back is "hasCredential: true").
@@ -16,6 +17,7 @@ import { z } from "zod";
 import { endSession, requireAdmin, requireSession, startSession } from "./auth.js";
 import { config } from "./config.js";
 import { notifyServersChanged, pool } from "./db.js";
+import { runChat } from "./chat.js";
 import { encrypt, hashPassword, newApiKey, randomToken, sha256, verifyPassword } from "./security.js";
 import { upstreams, type Caller } from "./upstreams.js";
 
@@ -55,7 +57,7 @@ api.post("/auth/logout", async (req, res) => {
 
 api.get("/auth/me", requireSession, async (_req, res) => {
   const { rows } = await pool.query("SELECT id, email, name, role FROM users WHERE id = $1", [caller(res).id]);
-  res.json({ ...rows[0], mcpUrl: config.mcpUrl, chatEnabled: Boolean(config.geminiApiKey) });
+  res.json({ ...rows[0], mcpUrl: config.mcpUrl, chatEnabled: Boolean(config.llmApiKey) });
 });
 
 /** Invited user picks their name + password via the link the admin shared. */
@@ -262,4 +264,31 @@ api.get("/audit", async (req, res) => {
     values,
   );
   res.json(rows);
+});
+
+// ============================== Chat agent ==============================
+
+/**
+ * The browser sends the whole conversation (text only) each time; the server keeps no chat state.
+ * The reply includes every tool the agent called, so the UI can show them.
+ */
+api.post("/chat", async (req, res) => {
+  const body = parse(
+    z.object({
+      messages: z.array(z.object({ role: z.enum(["user", "assistant"]), text: z.string().min(1).max(8_000) })).min(1).max(40),
+    }),
+    req, res,
+  );
+  if (!body) return;
+  try {
+    res.json(await runChat(body.messages, caller(res)));
+  } catch (err) {
+    // Typical causes: no API key configured, free-tier rate limit (429), model overloaded (503).
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("chat failed:", message);
+    const status = /429|quota|rate/i.test(message) ? 429 : 502;
+    res.status(status).json({
+      error: status === 429 ? "The LLM's free-tier rate limit was hit. Wait a minute and try again." : `The chat agent failed: ${message.slice(0, 300)}`,
+    });
+  }
 });

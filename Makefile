@@ -10,7 +10,7 @@ HELM    := helm --kube-context $(CONTEXT) -n $(NS)
 
 WOO_MCP_IMAGE    := urumi/woo-mcp:0.2.0
 EVERYTHING_IMAGE := urumi/everything-mcp:2.0.0
-GATEWAY_IMAGE    := urumi/gateway:0.1.2
+GATEWAY_IMAGE    := urumi/gateway:0.3.0
 
 .PHONY: cluster images deploy status admin-password gateway-admin-password setup-logs woo-mcp-forward uninstall
 

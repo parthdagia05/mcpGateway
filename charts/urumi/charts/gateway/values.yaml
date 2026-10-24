@@ -2,7 +2,7 @@
 
 image:
   repository: urumi/gateway
-  tag: "0.1.2"
+  tag: "0.3.0"
   pullPolicy: IfNotPresent
 
 # Stateless MCP endpoint + Postgres LISTEN/NOTIFY → safe to run more than one.
@@ -35,11 +35,15 @@ seedServers:
   - name: deepwiki
     url: https://mcp.deepwiki.com/mcp
 
-# Chat agent. The API key is NOT a value here: create the Secret yourself (see README):
-#   kubectl -n urumi create secret generic urumi-llm --from-literal=gemini-api-key=...
+# Chat agent. The API key is NOT a value here: create the Secret yourself (see README), e.g.
+#   kubectl -n urumi create secret generic urumi-llm --from-literal=api-key=...
+# provider "openai" = any OpenAI-compatible API (Groq, OpenRouter, OpenAI, Ollama); "gemini" = Google Gemini.
 llm:
+  provider: openai
+  baseUrl: https://api.groq.com/openai/v1
+  model: openai/gpt-oss-120b
   secretName: urumi-llm
-  model: gemini-2.5-flash
+  secretKey: api-key
 
 resources:
   requests: { cpu: 50m, memory: 128Mi }

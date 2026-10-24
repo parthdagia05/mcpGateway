@@ -86,11 +86,17 @@ spec:
             - name: REFRESH_INTERVAL_MS
               value: "{{ mul .Values.refreshIntervalSeconds 1000 }}"
             # Chat agent. optional: true = the gateway still starts if you haven't created this Secret yet.
-            - name: GEMINI_API_KEY
+            - name: LLM_API_KEY
               valueFrom:
-                secretKeyRef: { name: {{ .Values.llm.secretName }}, key: gemini-api-key, optional: true }
-            - name: GEMINI_MODEL
+                secretKeyRef: { name: {{ .Values.llm.secretName }}, key: {{ .Values.llm.secretKey }}, optional: true }
+            - name: LLM_PROVIDER
+              value: {{ .Values.llm.provider | quote }}
+            - name: LLM_BASE_URL
+              value: {{ .Values.llm.baseUrl | quote }}
+            - name: LLM_MODEL
               value: {{ .Values.llm.model | quote }}
+            - name: TIMEZONE
+              value: {{ .Values.global.timezone | quote }}
           readinessProbe:   # process up AND Postgres reachable (can't check API keys without it)
             httpGet: { path: /readyz, port: http }
             periodSeconds: 10

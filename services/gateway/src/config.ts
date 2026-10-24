@@ -43,9 +43,15 @@ export const config = {
   // Set to "true" when served over HTTPS so session cookies get the Secure flag.
   secureCookies: process.env.SECURE_COOKIES === "true",
 
-  // Chat agent (Gemini). Empty key = chat is switched off, everything else still works.
-  geminiApiKey: process.env.GEMINI_API_KEY ?? "",
-  geminiModel: process.env.GEMINI_MODEL ?? "gemini-2.5-flash",
+  // Chat agent. Empty key = chat is switched off, everything else still works.
+  //   provider "openai": any OpenAI-compatible API (Groq by default); "gemini": Google Gemini.
+  llmProvider: (process.env.LLM_PROVIDER ?? "openai") as "openai" | "gemini",
+  llmBaseUrl: process.env.LLM_BASE_URL ?? "https://api.groq.com/openai/v1",
+  llmModel: process.env.LLM_MODEL ?? "openai/gpt-oss-120b",
+  llmApiKey: process.env.LLM_API_KEY ?? "",
+
+  // Shown to the chat model as "the current time", so "today" means the same day as in the store.
+  timezone: process.env.TIMEZONE ?? "UTC",
 };
 
 if (config.encryptionKey.length !== 32) throw new Error("ENCRYPTION_KEY must be 32 bytes, base64-encoded");
