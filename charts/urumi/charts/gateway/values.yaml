@@ -2,7 +2,7 @@
 
 image:
   repository: urumi/gateway
-  tag: "0.3.0"
+  tag: "0.3.1"
   pullPolicy: IfNotPresent
 
 # Stateless MCP endpoint + Postgres LISTEN/NOTIFY → safe to run more than one.

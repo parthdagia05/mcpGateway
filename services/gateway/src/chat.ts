@@ -25,6 +25,8 @@ import { upstreams, type Caller } from "./upstreams.js";
 const MAX_STEPS = 8;              // max model ↔ tool rounds per question
 const MAX_TOOL_RESULT = 20_000;   // characters of a tool result passed back to the model
 const LLM_TIMEOUT_MS = 60_000;    // one model request
+const MAX_DESCRIPTION = 300;      // tool descriptions sent to the model are cut here: they're most of the prompt's tokens
+const MAX_RATE_LIMIT_WAIT_MS = 30_000; // on a free-tier rate limit, wait up to this long (as the API asks) and retry
 
 export type ChatMessage = { role: "user" | "assistant"; text: string };
 
@@ -61,7 +63,7 @@ function toolSchemas() {
     const { $schema: _ignored, ...schema } = (tool.inputSchema ?? {}) as Record<string, unknown>;
     return {
       name: tool.name,
-      description: tool.description ?? "",
+      description: (tool.description ?? "").slice(0, MAX_DESCRIPTION),
       parameters: { ...schema, type: "object", properties: (schema.properties as object) ?? {} },
     };
   });
@@ -92,6 +94,38 @@ type OpenAiMessage =
   | { role: "tool"; tool_call_id: string; content: string };
 type OpenAiToolCall = { id: string; type: "function"; function: { name: string; arguments: string } };
 
+type OpenAiResponse = { choices?: { message: { content: string | null; tool_calls?: OpenAiToolCall[] } }[]; error?: { message?: string } };
+
+/**
+ * One Chat Completions request. Free tiers allow only so many tokens per minute; when we hit that (HTTP 429)
+ * the API says how long to wait ("try again in 13.9s" / Retry-After). If that's short, we wait and retry
+ * (up to twice) so the user just sees a slower answer instead of an error.
+ */
+async function openAiRequest(body: unknown): Promise<OpenAiResponse> {
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(`${config.llmBaseUrl.replace(/\/+$/, "")}/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.llmApiKey}` },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
+    });
+    const data = (await res.json().catch(() => ({}))) as OpenAiResponse;
+    if (res.ok) return data;
+
+    const message = data.error?.message ?? res.statusText;
+    if (res.status === 429 && attempt < 2) {
+      const seconds = Number(res.headers.get("retry-after")) || Number(message.match(/try again in ([\d.]+)s/i)?.[1]) || 10;
+      const waitMs = Math.ceil(seconds * 1000) + 250;
+      if (waitMs <= MAX_RATE_LIMIT_WAIT_MS) {
+        console.log(`LLM rate limit hit, waiting ${(waitMs / 1000).toFixed(1)}s before retrying`);
+        await new Promise((r) => setTimeout(r, waitMs));
+        continue;
+      }
+    }
+    throw new Error(`LLM API returned HTTP ${res.status}: ${message}`);
+  }
+}
+
 async function runOpenAi(history: ChatMessage[], caller: Caller): Promise<ChatResult> {
   const messages: OpenAiMessage[] = [
     { role: "system", content: systemPrompt(caller) },
@@ -101,17 +135,7 @@ async function runOpenAi(history: ChatMessage[], caller: Caller): Promise<ChatRe
   const toolCalls: ToolCallRecord[] = [];
 
   for (let step = 0; step < MAX_STEPS; step++) {
-    const res = await fetch(`${config.llmBaseUrl.replace(/\/+$/, "")}/chat/completions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.llmApiKey}` },
-      body: JSON.stringify({ model: config.llmModel, messages, tools: tools.length ? tools : undefined, tool_choice: tools.length ? "auto" : undefined }),
-      signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
-    });
-    const data = (await res.json().catch(() => ({}))) as {
-      choices?: { message: { content: string | null; tool_calls?: OpenAiToolCall[] } }[];
-      error?: { message?: string };
-    };
-    if (!res.ok) throw new Error(`LLM API returned HTTP ${res.status}: ${data.error?.message ?? res.statusText}`);
+    const data = await openAiRequest({ model: config.llmModel, messages, tools: tools.length ? tools : undefined, tool_choice: tools.length ? "auto" : undefined });
 
     const message = data.choices?.[0]?.message;
     if (!message) throw new Error("LLM API returned no answer");

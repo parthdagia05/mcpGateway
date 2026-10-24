@@ -76,6 +76,17 @@ Re-planned on Sat Oct 24 (behind schedule). Faster mode from now on: one questio
 - **Startup:** the gateway waits for Postgres (retry every 2s) instead of crash-looping. Readiness = Postgres reachable; liveness = process up.
 - **NetworkPolicy:** the gateway accepts traffic only from Traefik. Outbound it may reach DNS, its Postgres, the two in-cluster MCP servers, and the internet on 443 **except** private ranges and `169.254.0.0/16` (cloud metadata). Postgres accepts only the gateway.
 
+**Phase D: Chat agent** (`services/gateway/src/chat.ts`, `POST /api/chat`)
+- **Provider:** Groq (`openai/gpt-oss-120b`, free tier) through the OpenAI-compatible Chat Completions API, called with plain `fetch`. The same code works with OpenRouter, OpenAI or a local Ollama by changing `llm.baseUrl` / `llm.model` in Helm values. Gemini is still supported (`llm.provider: gemini`), but our Gemini project was blocked by Google ("Your project has been denied access"), which is why we switched.
+- **The tool loop:** send the conversation + the gateway's merged tools → if the model asks for tools, run them (in parallel) and send the results back → repeat until it answers in text, for at most 8 rounds. The response lists every tool called (name, arguments, ok, duration) so the UI can show them.
+- **Acting as the logged-in user:** the request carries the user's dashboard session. Tool calls go through `upstreams.callTool(..., caller, "chat")`, the same routing, timeouts and audit path as external MCP clients, so they appear in the audit log under that user with source `chat`. No API key is created or sent to the browser.
+- **The chat runs inside the gateway process**, so it never talks to an upstream directly; it uses exactly the same choke point as `/mcp`.
+- **Stateless:** the browser sends the conversation each time, and the server keeps no chat state (works with 2 replicas).
+- **Prompt-injection defence:** the system prompt says tool descriptions and results are untrusted data, never instructions. Tool descriptions are cut to 300 characters before they reach the model (also the biggest token saving).
+- **Free-tier limits:** Groq allows 8,000 tokens per minute. On HTTP 429 the agent waits as long as the API asks (up to 30s) and retries, so the user gets a slower answer instead of an error.
+- **The key:** in the `urumi-llm` Secret, created by hand with `kubectl` (never in values files or Git). The env var is `optional: true`, so the gateway still runs without it, with chat switched off.
+- **Tested (the definition-of-done flow):** "Create a product called Chai Mug priced at 349" → product created and visible on the storefront; ordered it by hand with cash on delivery; "What orders came in today?" → returned that order. All calls audited under the admin with source `chat`.
+
 ## Suggested order across areas
 
 1. MCP protocol: the heart of everything
@@ -201,6 +212,7 @@ Why this order: MCP and Kubernetes are the two things that can block you. React 
 - [x] A. Store on k3d (COD order #12 placed and visible in WooCommerce, 2026-10-24)
 - [x] B. WooCommerce MCP server (5 tools, OAuth-signed REST, NetworkPolicy tested, 2026-10-24)
 - [x] C. Gateway (aggregation, routing, timeouts, keys, roles, invites, audit, 2 replicas; e2e tested 2026-10-24)
+- [x] D. Chat agent (Groq, tool loop as the logged-in user; DoD chat flow passed 2026-10-24)
 - [ ] 1. MCP protocol
 - [ ] 2. WooCommerce REST API
 - [ ] 3. Kubernetes core + Helm
