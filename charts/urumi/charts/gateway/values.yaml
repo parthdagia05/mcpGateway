@@ -49,6 +49,15 @@ resources:
   requests: { cpu: 50m, memory: 128Mi }
   limits: { cpu: 500m, memory: 384Mi }
 
+dashboard:
+  image:
+    repository: urumi/dashboard
+    tag: "0.1.1"
+    pullPolicy: IfNotPresent
+  resources:
+    requests: { cpu: 10m, memory: 32Mi }
+    limits: { cpu: 200m, memory: 128Mi }
+
 postgres:
   image: postgres:17-alpine
   storage: 1Gi

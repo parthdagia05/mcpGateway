@@ -1,0 +1,115 @@
+# The dashboard: static React files served by an unprivileged nginx.
+#
+#   http://<dashboardHost>/      → this nginx (the app)
+#   http://<dashboardHost>/api/* → the gateway (rule in gateway.yaml). Same origin, so the session cookie
+#                                   just works and no CORS is needed.
+# It holds no secrets and calls nothing itself: the browser talks to /api.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-dashboard
+  labels:
+    app.kubernetes.io/part-of: urumi
+spec:
+  type: ClusterIP
+  selector:
+    app: dashboard
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-dashboard
+  labels:
+    app.kubernetes.io/part-of: urumi
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dashboard
+  template:
+    metadata:
+      labels:
+        app: dashboard
+        app.kubernetes.io/part-of: urumi
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101   # "nginx" user in the unprivileged image
+        runAsGroup: 101
+      containers:
+        - name: dashboard
+          image: "{{ .Values.dashboard.image.repository }}:{{ .Values.dashboard.image.tag }}"
+          imagePullPolicy: {{ .Values.dashboard.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 20
+          resources: {{- toYaml .Values.dashboard.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp   # nginx needs somewhere writable for its pid file and temp files
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}-dashboard
+  labels:
+    app.kubernetes.io/part-of: urumi
+spec:
+  {{- with .Values.ingressClassName }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- if .Values.tls.enabled }}
+  tls:
+    - hosts: [{{ .Values.dashboardHost | quote }}]
+      secretName: {{ .Values.tls.secretName }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.dashboardHost | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service: { name: {{ .Release.Name }}-dashboard, port: { name: http } }
+---
+# Only the ingress controller may reach the dashboard, and it may reach nothing.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-dashboard
+  labels:
+    app.kubernetes.io/part-of: urumi
+spec:
+  podSelector:
+    matchLabels:
+      app: dashboard
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - port: 8080
+  egress: []

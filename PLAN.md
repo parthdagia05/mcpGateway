@@ -87,6 +87,15 @@ Re-planned on Sat Oct 24 (behind schedule). Faster mode from now on: one questio
 - **The key:** in the `urumi-llm` Secret, created by hand with `kubectl` (never in values files or Git). The env var is `optional: true`, so the gateway still runs without it, with chat switched off.
 - **Tested (the definition-of-done flow):** "Create a product called Chai Mug priced at 349" → product created and visible on the storefront; ordered it by hand with cash on delivery; "What orders came in today?" → returned that order. All calls audited under the admin with source `chat`.
 
+**Phase E: Dashboard** (`services/dashboard`, served by `charts/urumi/charts/gateway/templates/dashboard.yaml`)
+- **Stack:** React 19 + Vite + React Router 7 + TanStack Query (caching, and polling server status every 5s and the audit log every 3s). There's no UI kit: one hand-written stylesheet (`src/styles.css`), so it doesn't look like a template.
+- **Look ("terminal-ops"):** near-black with a faint green tint; colour only for meaning (green up/success, red down/error, amber disabled/warning, cyan links). IBM Plex Mono for the interface, Plex Sans for chat prose. Fonts are bundled into the image, with no requests to Google Fonts. Borders instead of shadows, bracketed tabs `[servers]`, `▲ up / ▼ down / ■ off` status, keys 1-5 to switch tabs.
+- **Pages:** servers (status, tools, add/edit/disable/remove, "check now"), chat (terminal transcript; each tool call is an expandable line with args + result), API keys (shown once, plus ready-to-paste Claude Code and Cursor configs), audit (filters + live refresh), members (invite link shown once, role change, remove; admins only).
+- **Same origin:** `dashboard.localtest.me/` → nginx (the app), `dashboard.localtest.me/api` → gateway. So the HttpOnly session cookie just works and there's no CORS to configure.
+- **What the browser can never receive:** upstream credentials (write-only fields; the API only says `hasCredential`), API keys after creation (only hashes exist), the LLM key, and the session token (HttpOnly, so JavaScript can't read it).
+- **Admin-only UI is a convenience:** members don't see the admin buttons, but the real check is the gateway's `requireAdmin` (403).
+- **Serving:** unprivileged nginx (uid 101, read-only filesystem, `/tmp` as an emptyDir) with a strict Content-Security-Policy and no framing. Its NetworkPolicy allows only Traefik in and nothing out.
+
 ## Suggested order across areas
 
 1. MCP protocol: the heart of everything
@@ -213,6 +222,7 @@ Why this order: MCP and Kubernetes are the two things that can block you. React 
 - [x] B. WooCommerce MCP server (5 tools, OAuth-signed REST, NetworkPolicy tested, 2026-10-24)
 - [x] C. Gateway (aggregation, routing, timeouts, keys, roles, invites, audit, 2 replicas; e2e tested 2026-10-24)
 - [x] D. Chat agent (Groq, tool loop as the logged-in user; DoD chat flow passed 2026-10-24)
+- [x] E. Dashboard (terminal-ops design; all pages screenshotted and reviewed 2026-10-24)
 - [ ] 1. MCP protocol
 - [ ] 2. WooCommerce REST API
 - [ ] 3. Kubernetes core + Helm

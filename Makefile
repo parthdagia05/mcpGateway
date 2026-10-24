@@ -11,6 +11,7 @@ HELM    := helm --kube-context $(CONTEXT) -n $(NS)
 WOO_MCP_IMAGE    := urumi/woo-mcp:0.2.0
 EVERYTHING_IMAGE := urumi/everything-mcp:2.0.0
 GATEWAY_IMAGE    := urumi/gateway:0.3.1
+DASHBOARD_IMAGE  := urumi/dashboard:0.1.1
 
 .PHONY: cluster images deploy status admin-password gateway-admin-password setup-logs woo-mcp-forward uninstall
 
@@ -21,7 +22,8 @@ images:           ## build our images and load them into k3d (no registry needed
 	docker build -t $(WOO_MCP_IMAGE) services/woo-mcp
 	docker build -t $(EVERYTHING_IMAGE) services/everything
 	docker build -t $(GATEWAY_IMAGE) services/gateway
-	k3d image import $(WOO_MCP_IMAGE) $(EVERYTHING_IMAGE) $(GATEWAY_IMAGE) -c urumi
+	docker build -t $(DASHBOARD_IMAGE) services/dashboard
+	k3d image import $(WOO_MCP_IMAGE) $(EVERYTHING_IMAGE) $(GATEWAY_IMAGE) $(DASHBOARD_IMAGE) -c urumi
 
 woo-mcp-forward:  ## debug only: expose woo-mcp on localhost:3300 for MCP Inspector (needs cluster admin access)
 	$(KUBECTL) port-forward svc/urumi-woo-mcp 3300:3000
