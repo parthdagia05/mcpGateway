@@ -52,6 +52,11 @@ spec:
           ports:
             - name: http
               containerPort: 8080
+          # On shutdown, wait 5s before stopping: the Pod is first removed from the Service, but the ingress
+          # controller needs a moment to notice. Without this pause, requests mid-rollout can hit a dying Pod.
+          lifecycle:
+            preStop:
+              sleep: { seconds: 5 }
           readinessProbe:
             httpGet: { path: /healthz, port: http }
             periodSeconds: 10
@@ -72,6 +77,9 @@ metadata:
   name: {{ .Release.Name }}-dashboard
   labels:
     app.kubernetes.io/part-of: urumi
+  {{- with .Values.global.ingressAnnotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   {{- with .Values.ingressClassName }}
   ingressClassName: {{ . }}
@@ -79,7 +87,7 @@ spec:
   {{- if .Values.tls.enabled }}
   tls:
     - hosts: [{{ .Values.dashboardHost | quote }}]
-      secretName: {{ .Values.tls.secretName }}
+      secretName: {{ .Values.tls.secretName }}-dashboard
   {{- end }}
   rules:
     - host: {{ .Values.dashboardHost | quote }}

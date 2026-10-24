@@ -50,6 +50,10 @@ export const config = {
   llmModel: process.env.LLM_MODEL ?? "openai/gpt-oss-120b",
   llmApiKey: process.env.LLM_API_KEY ?? "",
 
+  // In-cluster MCP servers the SSRF check lets through even though they have private addresses
+  // (comma-separated host names, e.g. "urumi-woo-mcp,urumi-everything-mcp"). See ssrf.ts.
+  allowedInternalHosts: (process.env.ALLOWED_INTERNAL_HOSTS ?? "").split(",").map((h) => h.trim().toLowerCase()).filter(Boolean),
+
   // Shown to the chat model as "the current time", so "today" means the same day as in the store.
   timezone: process.env.TIMEZONE ?? "UTC",
 };

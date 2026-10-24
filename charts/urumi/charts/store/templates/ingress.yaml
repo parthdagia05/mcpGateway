@@ -8,6 +8,9 @@ kind: Ingress
 metadata:
   name: {{ .Release.Name }}-store
   labels: {{- include "store.labels" . | nindent 4 }}
+  {{- with .Values.global.ingressAnnotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   {{- with .Values.ingressClassName }}
   ingressClassName: {{ . }}

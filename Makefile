@@ -10,10 +10,10 @@ HELM    := helm --kube-context $(CONTEXT) -n $(NS)
 
 WOO_MCP_IMAGE    := urumi/woo-mcp:0.2.0
 EVERYTHING_IMAGE := urumi/everything-mcp:2.0.0
-GATEWAY_IMAGE    := urumi/gateway:0.3.1
+GATEWAY_IMAGE    := urumi/gateway:0.4.0
 DASHBOARD_IMAGE  := urumi/dashboard:0.1.1
 
-.PHONY: cluster images deploy status admin-password gateway-admin-password setup-logs woo-mcp-forward uninstall
+.PHONY: cluster images push deploy status admin-password gateway-admin-password setup-logs woo-mcp-forward uninstall
 
 cluster:          ## create the local k3d cluster (safe to rerun)
 	./scripts/cluster-up.sh
@@ -24,6 +24,13 @@ images:           ## build our images and load them into k3d (no registry needed
 	docker build -t $(GATEWAY_IMAGE) services/gateway
 	docker build -t $(DASHBOARD_IMAGE) services/dashboard
 	k3d image import $(WOO_MCP_IMAGE) $(EVERYTHING_IMAGE) $(GATEWAY_IMAGE) $(DASHBOARD_IMAGE) -c urumi
+
+push:             ## VPS: tag + push our images to a registry, e.g. make push REGISTRY=ghcr.io/parthdagia05
+	@test -n "$(REGISTRY)" || (echo "usage: make push REGISTRY=ghcr.io/<you>" && exit 1)
+	for img in $(WOO_MCP_IMAGE) $(EVERYTHING_IMAGE) $(GATEWAY_IMAGE) $(DASHBOARD_IMAGE); do \
+	  target=$(REGISTRY)/$$(echo $$img | sed 's#^urumi/#urumi-#'); \
+	  docker tag $$img $$target && docker push $$target; \
+	done
 
 woo-mcp-forward:  ## debug only: expose woo-mcp on localhost:3300 for MCP Inspector (needs cluster admin access)
 	$(KUBECTL) port-forward svc/urumi-woo-mcp 3300:3000

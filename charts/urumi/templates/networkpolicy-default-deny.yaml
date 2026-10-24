@@ -1,0 +1,16 @@
+# Default deny: every Pod in the namespace refuses ALL incoming traffic unless another NetworkPolicy allows it.
+# Each component then gets a narrow allow rule next to its own templates:
+#   wordpress  ← traefik (storefront), woo-mcp (REST API)
+#   mariadb    ← wordpress, store-setup Job
+#   woo-mcp    ← gateway            everything-mcp ← gateway
+#   gateway    ← traefik            postgres       ← gateway
+#   dashboard  ← traefik
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-default-deny-ingress
+  labels:
+    app.kubernetes.io/part-of: urumi
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress"]

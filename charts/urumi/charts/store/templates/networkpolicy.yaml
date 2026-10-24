@@ -1,4 +1,4 @@
-# Only WordPress (and the setup Job, which runs wp-cli against the same database) may talk to MariaDB.
+# MariaDB: only WordPress (and the setup Job, which runs wp-cli against the same database) may talk to MariaDB.
 # Everything else in the cluster, including woo-mcp and the gateway, is blocked from port 3306.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -20,3 +20,28 @@ spec:
               app: store-setup
       ports:
         - port: 3306
+---
+# WordPress: the storefront (from the ingress controller) and the REST API (from woo-mcp). Nothing else.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-wordpress
+  labels: {{- include "store.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: wordpress
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+        - podSelector:
+            matchLabels:
+              app: woo-mcp
+      ports:
+        - port: 80

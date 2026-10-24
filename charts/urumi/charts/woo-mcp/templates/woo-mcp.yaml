@@ -73,6 +73,11 @@ spec:
             - name: MCP_AUTH_TOKEN
               valueFrom:
                 secretKeyRef: { name: {{ .Release.Name }}-woo-mcp-token, key: token }
+          # On shutdown, wait 5s before stopping: the Pod is first removed from the Service, but the ingress
+          # controller needs a moment to notice. Without this pause, requests mid-rollout can hit a dying Pod.
+          lifecycle:
+            preStop:
+              sleep: { seconds: 5 }
           # /healthz only says "the Node process is up". It does NOT check the store on purpose:
           # if the store is down we still want to answer tool calls with a clear "store unreachable" error.
           readinessProbe:

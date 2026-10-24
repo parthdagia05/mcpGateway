@@ -18,6 +18,7 @@ import { endSession, requireAdmin, requireSession, startSession } from "./auth.j
 import { config } from "./config.js";
 import { notifyServersChanged, pool } from "./db.js";
 import { runChat } from "./chat.js";
+import { checkUpstreamUrl } from "./ssrf.js";
 import { encrypt, hashPassword, newApiKey, randomToken, sha256, verifyPassword } from "./security.js";
 import { upstreams, type Caller } from "./upstreams.js";
 
@@ -112,6 +113,8 @@ api.post("/servers", requireAdmin, async (req, res) => {
   const body = parse(z.object(serverFields), req, res);
   if (!body) return;
   if (body.authType === "header" && !body.authHeader) return res.status(400).json({ error: "authHeader: required for header auth" });
+  const unsafe = await checkUpstreamUrl(body.url);
+  if (unsafe) return res.status(400).json({ error: `url: ${unsafe}` });
   try {
     const { rows } = await pool.query(
       `INSERT INTO servers (name, url, auth_type, auth_header, auth_secret_enc, enabled, timeout_ms)
@@ -131,6 +134,10 @@ api.patch("/servers/:id", requireAdmin, async (req, res) => {
   // credential: omitted = keep the current one, "" = remove it, any other string = replace it.
   const body = parse(z.object(serverFields).partial(), req, res);
   if (!body) return;
+  if (body.url !== undefined) {
+    const unsafe = await checkUpstreamUrl(body.url);
+    if (unsafe) return res.status(400).json({ error: `url: ${unsafe}` });
+  }
   const sets: string[] = [];
   const values: unknown[] = [];
   const set = (column: string, value: unknown) => { values.push(value); sets.push(`${column} = $${values.length}`); };

@@ -81,6 +81,9 @@ spec:
               value: "{{ .Values.scheme }}://{{ .Values.dashboardHost }}"
             - name: SECURE_COOKIES
               value: {{ eq .Values.scheme "https" | quote }}
+            # In-cluster MCP servers the SSRF check allows (everything else must resolve to a public address).
+            - name: ALLOWED_INTERNAL_HOSTS
+              value: {{ concat (list (printf "%s-woo-mcp" .Release.Name) (printf "%s-everything-mcp" .Release.Name)) .Values.allowedInternalHosts | join "," | quote }}
             - name: UPSTREAM_TIMEOUT_MS
               value: "{{ mul .Values.upstreamTimeoutSeconds 1000 }}"
             - name: REFRESH_INTERVAL_MS
@@ -97,6 +100,11 @@ spec:
               value: {{ .Values.llm.model | quote }}
             - name: TIMEZONE
               value: {{ .Values.global.timezone | quote }}
+          # On shutdown, wait 5s before stopping: the Pod is first removed from the Service, but the ingress
+          # controller needs a moment to notice. Without this pause, requests mid-rollout can hit a dying Pod.
+          lifecycle:
+            preStop:
+              sleep: { seconds: 5 }
           readinessProbe:   # process up AND Postgres reachable (can't check API keys without it)
             httpGet: { path: /readyz, port: http }
             periodSeconds: 10
@@ -112,6 +120,9 @@ metadata:
   name: {{ .Release.Name }}-gateway
   labels:
     app.kubernetes.io/part-of: urumi
+  {{- with .Values.global.ingressAnnotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   {{- with .Values.ingressClassName }}
   ingressClassName: {{ . }}

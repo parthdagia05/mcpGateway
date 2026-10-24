@@ -25,6 +25,7 @@ import { writeAudit } from "./audit.js";
 import { config } from "./config.js";
 import { pool } from "./db.js";
 import { decrypt } from "./security.js";
+import { checkUpstreamUrl } from "./ssrf.js";
 
 export const SEPARATOR = "__";
 const MAX_EXPOSED_NAME = 64;
@@ -165,6 +166,10 @@ class UpstreamManager {
 
   /** Open an MCP connection: HTTP POST "initialize", then the "initialized" notification. */
   private async connect(row: ServerRow): Promise<Client> {
+    // Re-check the URL every time we connect: a DNS name can start pointing somewhere internal after it was saved.
+    const unsafe = await checkUpstreamUrl(row.url);
+    if (unsafe) throw new Error(`blocked: ${unsafe}`);
+
     // The upstream credential is decrypted ONLY here, in memory, right before it's attached to outbound requests.
     // It is never sent to browsers or MCP clients, and the caller's own API key is never forwarded upstream.
     const headers: Record<string, string> = {};

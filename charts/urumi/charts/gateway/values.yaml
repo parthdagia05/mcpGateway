@@ -2,7 +2,7 @@
 
 image:
   repository: urumi/gateway
-  tag: "0.3.1"
+  tag: "0.4.0"
   pullPolicy: IfNotPresent
 
 # Stateless MCP endpoint + Postgres LISTEN/NOTIFY → safe to run more than one.
@@ -18,6 +18,10 @@ tls:
   secretName: gateway-tls
 
 bootstrapAdminEmail: admin@urumi.local
+
+# Extra in-cluster hosts admins may register as upstreams (our own woo-mcp and everything-mcp are always allowed).
+# Anything else must resolve to a public address (SSRF protection).
+allowedInternalHosts: []
 
 # Per-upstream timeout and how often upstreams are re-checked.
 upstreamTimeoutSeconds: 15

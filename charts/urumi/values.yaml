@@ -5,6 +5,8 @@ global:
   # One timezone for the whole system: WordPress shows order times in it, and woo-mcp uses it
   # to decide what "today" means for list_orders.
   timezone: Asia/Kolkata
+  # Annotations added to every Ingress, e.g. cert-manager's cluster-issuer on the VPS.
+  ingressAnnotations: {}
 
 # Settings under "store:" are handed to the store subchart as its .Values
 store:
