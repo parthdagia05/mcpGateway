@@ -60,6 +60,12 @@ spec:
             - name: ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef: { name: {{ include "store.secretName" . }}, key: wp-admin-password }
+            - name: WOO_CONSUMER_KEY
+              valueFrom:
+                secretKeyRef: { name: {{ .Release.Name }}-woo-api, key: consumer-key }
+            - name: WOO_CONSUMER_SECRET
+              valueFrom:
+                secretKeyRef: { name: {{ .Release.Name }}-woo-api, key: consumer-secret }
             - name: SITE_URL
               value: "{{ .Values.scheme }}://{{ .Values.host }}"
             - name: SITE_TITLE
@@ -72,6 +78,8 @@ spec:
               value: {{ .Values.setup.wooVersion | quote }}
             - name: CURRENCY
               value: {{ .Values.setup.currency | quote }}
+            - name: TIMEZONE
+              value: {{ .Values.global.timezone | quote }}
             - name: HOME
               value: /tmp   # wp-cli keeps its download cache under $HOME
           resources:

@@ -9,3 +9,5 @@ version: 0.1.0
 dependencies:
   - name: store
     version: 0.1.0
+  - name: woo-mcp
+    version: 0.1.0

@@ -1,5 +1,17 @@
 # Defaults shared by every environment. values-local.yaml / values-prod.yaml override only what differs.
 
+# "global" values are visible to every subchart as .Values.global.*
+global:
+  # One timezone for the whole system: WordPress shows order times in it, and woo-mcp uses it
+  # to decide what "today" means for list_orders.
+  timezone: Asia/Kolkata
+
 # Settings under "store:" are handed to the store subchart as its .Values
 store:
   host: store.example.com
+
+# Settings under "woo-mcp:" go to the WooCommerce MCP server subchart
+woo-mcp:
+  image:
+    repository: urumi/woo-mcp
+    tag: "0.1.0"

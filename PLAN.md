@@ -49,6 +49,17 @@ Re-planned on Sat Oct 24 (behind schedule). Faster mode from now on: one questio
 - **Ingress:** `store.localtest.me` → Traefik (built into k3s) → WordPress Service. MariaDB has no Ingress, so it's unreachable from outside.
 - **Makefile:** every command names the `k3d-urumi` cluster, because this laptop has other clusters too.
 
+**Phase B: WooCommerce MCP server** (`services/woo-mcp`, chart `charts/urumi/charts/woo-mcp`)
+- **Talks to the store through the WooCommerce REST API (v3)**, not the database and not WP-CLI. The REST API runs WooCommerce's own logic (stock, totals, emails, hooks), stays stable across versions, and needs only a limited, revocable API key instead of the database password.
+- **Authentication is OAuth 1.0a signing**, because we call WordPress over plain HTTP inside the cluster and WooCommerce refuses a plain key + secret over HTTP. Each request carries the key, a timestamp, a random nonce and an HMAC-SHA256 signature made with the secret. The secret never crosses the network, and captured requests can't be replayed. The signature is computed against the store's public home URL, which woo-mcp reads once from `GET /wp-json/`.
+- **API key lifecycle:** Helm generates the key + secret into their own Secret `urumi-woo-api` (kept apart from the DB passwords, so woo-mcp can read only what it needs). The setup Job registers it in WooCommerce, stored hashed, the same way WooCommerce's admin screen does.
+- **Stateless Streamable HTTP:** a fresh MCP server per request, no `Mcp-Session-Id`. The tools need no memory between calls, and any replica can answer any request.
+- **Tools:** `list_products`, `create_product`, `list_orders` (with `period: today | yesterday | last_7_days | last_30_days`, computed in the store's timezone), `get_order`, `update_order_status` (returns previous + new status). Results are trimmed JSON. Store failures come back as tool errors (`isError: true`) with a readable message, with a 10s timeout.
+- **One timezone for everything** (`global.timezone: Asia/Kolkata`): WordPress shows order times in it, and woo-mcp uses it to decide what "today" means.
+- **Internal only, enforced twice:** ClusterIP Service with no Ingress (nothing outside the cluster can reach it), plus a NetworkPolicy: only Pods labelled `app=gateway` may call it. Its outbound traffic is limited to DNS + WordPress, so a compromised woo-mcp can't reach MariaDB. MariaDB has its own policy: only WordPress and the setup Job.
+- **Container:** two-stage Docker build (no compiler or source in the final image), runs as non-root `node` (uid 1000), read-only filesystem, no Linux capabilities. Locally it's loaded with `k3d image import`; on a VPS it would come from a registry.
+- **Probes:** `/healthz` only checks that the Node process is up, not the store, so when the store is down tool calls still return a clear "store unreachable" error instead of the server vanishing.
+
 ## Suggested order across areas
 
 1. MCP protocol: the heart of everything
@@ -172,6 +183,7 @@ Why this order: MCP and Kubernetes are the two things that can block you. React 
 ## Progress
 
 - [x] A. Store on k3d (COD order #12 placed and visible in WooCommerce, 2026-10-24)
+- [x] B. WooCommerce MCP server (5 tools, OAuth-signed REST, NetworkPolicy tested, 2026-10-24)
 - [ ] 1. MCP protocol
 - [ ] 2. WooCommerce REST API
 - [ ] 3. Kubernetes core + Helm

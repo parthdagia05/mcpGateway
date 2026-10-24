@@ -1,0 +1,39 @@
+# Firewall rules for the woo-mcp Pods. Once a Pod is selected by a NetworkPolicy, anything not listed is DROPPED.
+#
+# IN:   only Pods labelled app=gateway, on port 3000. (The gateway is the single front door; nothing else
+#       may call upstream MCP servers directly, not even other Pods in this namespace.)
+# OUT:  only DNS (to look up "urumi-wordpress") and the WordPress Pods on port 80.
+#       So even a compromised woo-mcp can't reach MariaDB, the gateway's database, or the internet.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-woo-mcp
+  labels:
+    app.kubernetes.io/part-of: urumi
+spec:
+  podSelector:
+    matchLabels:
+      app: woo-mcp
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: gateway
+      ports:
+        - port: 3000
+  egress:
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - { port: 53, protocol: UDP }
+        - { port: 53, protocol: TCP }
+    - to:
+        - podSelector:
+            matchLabels:
+              app: wordpress
+      ports:
+        - port: 80

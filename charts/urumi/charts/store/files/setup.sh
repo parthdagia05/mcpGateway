@@ -49,6 +49,7 @@ fi
 wp plugin is-active woocommerce || wp plugin activate woocommerce
 
 # Store settings. "option update" just overwrites, so these are always safe to rerun.
+wp option update timezone_string "$TIMEZONE" >/dev/null          # order times shown in the same timezone woo-mcp uses
 wp option update woocommerce_currency "$CURRENCY" >/dev/null
 wp option update woocommerce_default_country "IN:DL" >/dev/null
 wp option update woocommerce_coming_soon "no" >/dev/null          # new stores start hidden in "coming soon" mode
@@ -65,7 +66,35 @@ wp option update woocommerce_cod_settings \
 # Shop, Cart, Checkout and My Account pages (skips any that already exist).
 wp wc tool run install_pages --user="$ADMIN_USER" >/dev/null
 
-# --- 4. One sample product, so a fresh store isn't empty ------------------------------------------------
+# --- 4. REST API key for the WooCommerce MCP server -----------------------------------------------------
+# Helm generated the key + secret (Secret "urumi-woo-api"); here we register them inside WooCommerce.
+# WooCommerce has no wp-cli command for API keys, so we write the row the same way its admin screen does:
+# the consumer key is stored HASHED (wc_api_hash), the secret as-is, plus the last 7 chars for display.
+# If a key with this hash exists we do nothing; if the Secret was rotated, the old "woo-mcp" key is replaced.
+wp eval '
+  global $wpdb;
+  $table = $wpdb->prefix . "woocommerce_api_keys";
+  $ck    = getenv("WOO_CONSUMER_KEY");
+  $cs    = getenv("WOO_CONSUMER_SECRET");
+  $hash  = wc_api_hash($ck);
+  if ($wpdb->get_var($wpdb->prepare("SELECT key_id FROM $table WHERE consumer_key = %s", $hash))) {
+    echo "[setup] REST API key for woo-mcp already registered\n";
+    return;
+  }
+  $wpdb->delete($table, ["description" => "woo-mcp"]);
+  $admin = get_user_by("login", getenv("ADMIN_USER"));
+  $wpdb->insert($table, [
+    "user_id"         => $admin->ID,
+    "description"     => "woo-mcp",
+    "permissions"     => "read_write",
+    "consumer_key"    => $hash,
+    "consumer_secret" => $cs,
+    "truncated_key"   => substr($ck, -7),
+  ]);
+  echo "[setup] registered REST API key for woo-mcp\n";
+'
+
+# --- 5. One sample product, so a fresh store isn't empty ------------------------------------------------
 if [ "$(wp post list --post_type=product --format=count)" = "0" ]; then
   log "creating a sample product"
   wp wc product create --name="Urumi T-Shirt" --regular_price=499 --user="$ADMIN_USER" >/dev/null

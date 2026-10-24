@@ -1,0 +1,81 @@
+# The WooCommerce MCP server.
+#
+# Flow:  gateway → this Service (urumi-woo-mcp:3000/mcp) → woo-mcp Pod → WordPress Service (REST API) → MariaDB
+#
+# Internal only: ClusterIP Service and NO Ingress, so nothing outside the cluster can reach it.
+# Inside the cluster, networkpolicy.yaml narrows it further to "only the gateway".
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-woo-mcp
+  labels:
+    app.kubernetes.io/part-of: urumi
+spec:
+  type: ClusterIP
+  selector:
+    app: woo-mcp
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-woo-mcp
+  labels:
+    app.kubernetes.io/part-of: urumi
+spec:
+  replicas: {{ .Values.replicas }}
+  selector:
+    matchLabels:
+      app: woo-mcp
+  template:
+    metadata:
+      labels:
+        app: woo-mcp
+        app.kubernetes.io/part-of: urumi
+    spec:
+      # Locked down: non-root, can't gain privileges, no Linux capabilities, read-only filesystem.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+      containers:
+        - name: woo-mcp
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            - name: PORT
+              value: "3000"
+            # Where to send REST calls: the WordPress Service, by name.
+            - name: WOO_STORE_URL
+              value: http://{{ .Release.Name }}-wordpress
+            - name: WOO_TIMEOUT_MS
+              value: "{{ mul .Values.timeoutSeconds 1000 }}"
+            - name: STORE_TIMEZONE
+              value: {{ .Values.global.timezone | quote }}
+            # The REST API key: only this Secret, never the database passwords.
+            - name: WOO_CONSUMER_KEY
+              valueFrom:
+                secretKeyRef: { name: {{ .Release.Name }}-woo-api, key: consumer-key }
+            - name: WOO_CONSUMER_SECRET
+              valueFrom:
+                secretKeyRef: { name: {{ .Release.Name }}-woo-api, key: consumer-secret }
+          # /healthz only says "the Node process is up". It does NOT check the store on purpose:
+          # if the store is down we still want to answer tool calls with a clear "store unreachable" error.
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 20
+          resources: {{- toYaml .Values.resources | nindent 12 }}
