@@ -10,10 +10,10 @@ HELM    := helm --kube-context $(CONTEXT) -n $(NS)
 
 WOO_MCP_IMAGE    := urumi/woo-mcp:0.2.0
 EVERYTHING_IMAGE := urumi/everything-mcp:2.0.0
-GATEWAY_IMAGE    := urumi/gateway:0.4.1
+GATEWAY_IMAGE    := urumi/gateway:0.4.2
 DASHBOARD_IMAGE  := urumi/dashboard:0.1.1
 
-.PHONY: cluster images push deploy status admin-password gateway-admin-password setup-logs woo-mcp-forward uninstall
+.PHONY: cluster images push llm-key deploy status admin-password gateway-admin-password setup-logs woo-mcp-forward uninstall
 
 cluster:          ## create the local k3d cluster (safe to rerun)
 	./scripts/cluster-up.sh
@@ -34,6 +34,12 @@ push:             ## VPS: tag + push our images to a registry, e.g. make push RE
 
 woo-mcp-forward:  ## debug only: expose woo-mcp on localhost:3300 for MCP Inspector (needs cluster admin access)
 	$(KUBECTL) port-forward svc/urumi-woo-mcp 3300:3000
+
+llm-key:          ## store the chat agent's LLM API key (Groq by default) in the urumi-llm Secret; input is hidden
+	@kubectl --context $(CONTEXT) create namespace $(NS) --dry-run=client -o yaml | kubectl --context $(CONTEXT) apply -f - >/dev/null
+	@printf "LLM API key: "; stty -echo; read key; stty echo; echo; \
+	  kubectl --context $(CONTEXT) -n $(NS) create secret generic urumi-llm --from-literal=api-key="$$key" --dry-run=client -o yaml \
+	  | kubectl --context $(CONTEXT) -n $(NS) apply -f -
 
 deploy:           ## install or upgrade everything (waits for the store setup Job)
 	$(HELM) upgrade --install urumi $(CHART) --create-namespace -f $(VALUES) --timeout 15m

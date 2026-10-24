@@ -16,3 +16,7 @@ values-*.secret.yaml
 
 # Logs
 *.log
+
+
+# Personal notes (kept locally, not part of the submission)
+PLAN.md

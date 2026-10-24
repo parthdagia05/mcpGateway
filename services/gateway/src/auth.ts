@@ -24,8 +24,8 @@ export async function requireApiKey(req: Request, res: Response, next: NextFunct
   const key = header.match(/^Bearer\s+(\S+)$/i)?.[1];
 
   const reject = (message: string) => {
-    // WWW-Authenticate tells MCP clients this endpoint wants a bearer token.
-    res.setHeader("WWW-Authenticate", 'Bearer realm="urumi-gateway"');
+    // No WWW-Authenticate header on purpose: in MCP that header means "start the OAuth flow", and this gateway
+    // uses API keys, not OAuth. Without it, clients simply show our message (e.g. "This API key has been revoked").
     res.status(401).json({ jsonrpc: "2.0", id: null, error: { code: -32001, message } });
   };
 
