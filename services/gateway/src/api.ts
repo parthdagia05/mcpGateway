@@ -89,15 +89,25 @@ const SERVER_NAME = z
   .regex(/^[a-z][a-z0-9-]{1,29}$/, "2-30 characters: lowercase letters, digits and '-', starting with a letter")
   .refine((n) => !n.includes("__"), "can't contain '__' (it separates server and tool names)");
 
+// The fields of a server, WITHOUT defaults. Edits (PATCH) must use this as-is: with defaults, a request that
+// only says {"enabled": true} would silently reset authType to "none" and the timeout to 15s.
 const serverFields = {
   name: SERVER_NAME,
   url: z.string().url().refine((u) => /^https?:\/\//.test(u), "must be an http(s) URL"),
-  authType: z.enum(["none", "bearer", "header"]).default("none"),
+  authType: z.enum(["none", "bearer", "header"]),
   authHeader: z.string().regex(/^[A-Za-z0-9-]+$/, "a plain HTTP header name").optional(),
   credential: z.string().max(4096).optional(),
-  enabled: z.boolean().default(true),
-  timeoutMs: z.number().int().min(1_000).max(120_000).default(config.defaultTimeoutMs),
+  enabled: z.boolean(),
+  timeoutMs: z.number().int().min(1_000).max(120_000),
 };
+
+// Adding a server: the same fields, with defaults for what the admin left out.
+const newServerSchema = z.object({
+  ...serverFields,
+  authType: serverFields.authType.default("none"),
+  enabled: serverFields.enabled.default(true),
+  timeoutMs: serverFields.timeoutMs.default(config.defaultTimeoutMs),
+});
 
 /** After any change: reload this replica now, and tell the other replicas to reload too. */
 async function serversChanged() {
@@ -110,7 +120,7 @@ api.get("/servers", (_req, res) => {
 });
 
 api.post("/servers", requireAdmin, async (req, res) => {
-  const body = parse(z.object(serverFields), req, res);
+  const body = parse(newServerSchema, req, res);
   if (!body) return;
   if (body.authType === "header" && !body.authHeader) return res.status(400).json({ error: "authHeader: required for header auth" });
   const unsafe = await checkUpstreamUrl(body.url);
@@ -131,7 +141,7 @@ api.post("/servers", requireAdmin, async (req, res) => {
 });
 
 api.patch("/servers/:id", requireAdmin, async (req, res) => {
-  // credential: omitted = keep the current one, "" = remove it, any other string = replace it.
+  // Only the fields sent are changed. credential: omitted = keep, "" = remove, any other string = replace.
   const body = parse(z.object(serverFields).partial(), req, res);
   if (!body) return;
   if (body.url !== undefined) {
